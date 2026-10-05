@@ -1,0 +1,18 @@
+services:
+  sentinel-agent:
+    build: .
+    container_name: sentinel-agent
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - SENTINEL_MODEL=${SENTINEL_MODEL:-gpt-4o-mini}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - SENTINEL_TIMEOUT=${SENTINEL_TIMEOUT:-15}
+      - SENTINEL_TOTAL_TIMEOUT=${SENTINEL_TOTAL_TIMEOUT:-30}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+    env_file:
+      - .env
+    restart: unless-stopped

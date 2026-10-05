@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Git / IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# 本地数据（ChromaDB 持久化在宿主机 volume，不进镜像）
+data/*.sqlite3
+data/*.bin
+data/*.db
+data/chroma/
+_test_chroma/
+
+# 环境变量与本地笔记
+.env
+.env.local
+docs/ROADMAP.md
+.notes/
+
+# 文档与测试（镜像只跑服务）
+tests/
+README.md
+docs/
