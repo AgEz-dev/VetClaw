@@ -84,17 +84,22 @@ class FakeClient:
     def completions(self):
         return self
 
-    def create(self, model, messages, tools):
+    def create(self, model, messages, tools, stream=False):
         self.snapshots.append(list(messages))
+
+        def gen(chunks):
+            for c in chunks:
+                yield c
+
         if len(self.snapshots) == 1:
-            tc = SimpleNamespace(id="call_1", type="function",
-                                 function=SimpleNamespace(
-                                     name="search_knowledge_base",
-                                     arguments='{"query": "部署怎么启动"}'))
-            return SimpleNamespace(choices=[SimpleNamespace(
-                message=SimpleNamespace(content=None, tool_calls=[tc]))])
-        return SimpleNamespace(choices=[SimpleNamespace(
-            message=SimpleNamespace(content="（最终答案）", tool_calls=None))])
+            function = SimpleNamespace(name="search_knowledge_base",
+                                      arguments='{"query": "部署怎么启动"}')
+            piece = SimpleNamespace(index=0, id="call_1", type="function",
+                                   function=function)
+            delta = SimpleNamespace(content=None, tool_calls=[piece])
+            return gen([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
+        delta = SimpleNamespace(content="（最终答案）", tool_calls=None)
+        return gen([SimpleNamespace(choices=[SimpleNamespace(delta=delta)])])
 
 
 def test_agent_link():
