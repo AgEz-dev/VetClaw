@@ -26,8 +26,9 @@ rag_provider = RAGProvider()
 def format_results(results, query):
     hits = [r for r in results if r.get("distance", 0.0) <= MAX_DISTANCE]
     if not hits:
-        return (f"知识库中未检索到与「{query}」相关的内容，请基于通用知识回答，"
-                "或明确告知缺少相关文档，不要编造。")
+        return (f"【检索未命中】知识库中未检索到与「{query}」相关的内容；"
+                "请直接回复：知识库中未检索到相关信息，无法提供确切解答，"
+                "建议补充文档或联系维护者。不要使用通用知识编造技术参数。")
     lines = ["【知识库检索结果】"]
     for i, r in enumerate(hits, 1):
         content = r.get("content", "")
