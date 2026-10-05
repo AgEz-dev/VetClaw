@@ -26,8 +26,32 @@ def chunk(content="docker compose up -d 拉起服务", source="knowledge/deploy.
             "chunk_id": f"{source}#{idx}", "distance": distance}
 
 
+def chunks_of(message):
+    """把完整 assistant 消息转成流式 delta chunks。"""
+    chunks = []
+    if message.tool_calls:
+        for i, tc in enumerate(message.tool_calls):
+            function = SimpleNamespace(name=tc.function.name,
+                                      arguments=tc.function.arguments)
+            piece = SimpleNamespace(index=i, id=tc.id, type="function",
+                                   function=function)
+            delta = SimpleNamespace(content=None, tool_calls=[piece])
+            chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=delta)]))
+        return chunks
+    delta = SimpleNamespace(content=message.content, tool_calls=None)
+    return [SimpleNamespace(choices=[SimpleNamespace(delta=delta)])]
+
+
+class _Stream:
+    def __init__(self, chunks):
+        self._c = chunks
+
+    def __iter__(self):
+        return iter(self._c)
+
+
 class ScriptedClient:
-    """按 create 调用次序返回预设 message，并对每次 messages 做快照。"""
+    """按 create 调用次序返回预设消息（流式），并对每次 messages 做快照。"""
 
     def __init__(self, script):
         self.script, self.snapshots = script, []
@@ -40,10 +64,11 @@ class ScriptedClient:
     def completions(self):
         return self
 
-    def create(self, model, messages, tools):
+    def create(self, model, messages, tools, stream=False):
         self.snapshots.append(list(messages))
-        return SimpleNamespace(choices=[SimpleNamespace(
-            message=self.script[len(self.snapshots) - 1])])
+        message = self.script[len(self.snapshots) - 1]
+        return _Stream(chunks_of(message)) if stream else \
+            SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 def answer(content):
