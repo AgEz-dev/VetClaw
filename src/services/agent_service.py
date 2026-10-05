@@ -14,7 +14,8 @@ def build_agent():
         kwargs["base_url"] = settings.base_url
     if settings.api_key:
         kwargs["api_key"] = settings.api_key
-    return ReActAgent(OpenAI(**kwargs), registry, model=settings.model)
+    return ReActAgent(OpenAI(**kwargs), registry, model=settings.model,
+                      total_timeout=settings.total_timeout)
 
 
 def get_agent():
