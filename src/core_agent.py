@@ -1,7 +1,11 @@
 """ReAct 调度核心：统一事件生成器 _run_events 同时驱动 run() 与 run_stream()（零 LangChain）。"""
 import json
+import logging
 import re
+import time
 from types import SimpleNamespace
+
+logger = logging.getLogger(__name__)
 
 CITATION_MARK = "【来源："
 HIT_MARK = "【知识库检索结果】"
@@ -28,12 +32,18 @@ DEFAULT_SYSTEM_PROMPT = """你是 Sentinel-Agent，一个可以使用工具的�
 
 class ReActAgent:
     def __init__(self, client, registry, model="gpt-4o-mini",
-                 max_steps=5, system_prompt=DEFAULT_SYSTEM_PROMPT):
+                 max_steps=5, system_prompt=DEFAULT_SYSTEM_PROMPT,
+                 clock=None, total_timeout=30.0):
         self.client = client
         self.registry = registry
         self.model = model
         self.max_steps = max_steps
         self.system_prompt = system_prompt
+        # 可注入时钟：生产用 time.monotonic，测试注入假时钟可 0ms 跑完超时拦截。
+        self._clock = clock or time.monotonic
+        # 总时长守卫：整个 _run_events 生命周期共用一个 start，含多轮模型调用与工具执行。
+        # SDK 层 timeout=15s 防单次 read 挂死；Agent 层 total_timeout=30s 防整体跑飞。
+        self.total_timeout = total_timeout
 
     def run(self, prompt, history=None):
         # 消费统一事件流：done 取 answer、error 取 message，与流式行为 100% 一致。
@@ -52,6 +62,7 @@ class ReActAgent:
         # 已知边界：技术问题若模型自行跳过检索（cite_state 始终 None），单 Agent 无法
         # 拦截，属 Prompt 规划层问题；后续靠微调或独立 Router 分类解决。
         cite_state = None
+        start = self._clock()  # 全局总超时起点：多轮模型调用 + 工具执行都计入
         messages = [{"role": "system", "content": self.system_prompt}]
         if history:
             messages.extend(history)
@@ -59,27 +70,50 @@ class ReActAgent:
         yield {"event": "thought", "data": {"stage": "thinking"}}
 
         for _ in range(self.max_steps):
+            if self._clock() - start > self.total_timeout:
+                yield {"event": "error", "data": {"code": "MODEL_TIMEOUT",
+                       "message": "模型响应超时，请稍后重试"}}
+                return
             tool_parts, text_parts = {}, []
-            stream = self.client.chat.completions.create(
-                model=self.model, messages=messages,
-                tools=self.registry.schemas(), stream=True)
-            for chunk in stream:
-                delta = chunk.choices[0].delta
-                for p in (getattr(delta, "tool_calls", None) or []):
-                    idx = getattr(p, "index", 0) or 0
-                    slot = tool_parts.setdefault(idx, {"id": "", "name": "", "arguments": ""})
-                    if getattr(p, "id", None):
-                        slot["id"] = p.id
-                    fn = getattr(p, "function", None)
-                    if fn:
-                        if getattr(fn, "name", None) and not slot["name"]:
-                            slot["name"] = fn.name  # 仅初次非空赋值，严禁 += 累加 name
-                        if getattr(fn, "arguments", None):
-                            slot["arguments"] += fn.arguments
-                piece = getattr(delta, "content", None)
-                if piece:
-                    text_parts.append(piece)
-                    yield {"event": "token", "data": {"text": piece}}
+            stream = None
+            try:
+                stream = self.client.chat.completions.create(
+                    model=self.model, messages=messages,
+                    tools=self.registry.schemas(), stream=True)
+                for chunk in stream:
+                    if self._clock() - start > self.total_timeout:
+                        yield {"event": "error", "data": {"code": "MODEL_TIMEOUT",
+                               "message": "模型响应超时，请稍后重试"}}
+                        return
+                    delta = chunk.choices[0].delta
+                    for p in (getattr(delta, "tool_calls", None) or []):
+                        idx = getattr(p, "index", 0) or 0
+                        slot = tool_parts.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+                        if getattr(p, "id", None):
+                            slot["id"] = p.id
+                        fn = getattr(p, "function", None)
+                        if fn:
+                            if getattr(fn, "name", None) and not slot["name"]:
+                                slot["name"] = fn.name  # 仅初次非空赋值，严禁 += 累加 name
+                            if getattr(fn, "arguments", None):
+                                slot["arguments"] += fn.arguments
+                    piece = getattr(delta, "content", None)
+                    if piece:
+                        text_parts.append(piece)
+                        yield {"event": "token", "data": {"text": piece}}
+            except Exception as e:
+                # SDK 层（httpx read timeout / 连接错误）兜底转 SSE error，不让 traceback 冒到 HTTP 层
+                logger.exception("model stream error")
+                code = "MODEL_TIMEOUT" if "timeout" in type(e).__name__.lower() else "INTERNAL_ERROR"
+                yield {"event": "error", "data": {"code": code,
+                       "message": "模型服务暂时不可用，请稍后重试"}}
+                return
+            finally:
+                if stream is not None and hasattr(stream, "close"):
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
 
             if tool_parts:
                 calls = [{"id": v["id"], "type": "function",
@@ -115,7 +149,8 @@ class ReActAgent:
 
         message = DEGRADE_ANSWER if cite_state in ("hit", "miss") \
             else f"已达到最大步数 {self.max_steps}，强制停止。"
-        yield {"event": "error", "data": {"message": message}}
+        code = "DEGRADED" if cite_state in ("hit", "miss") else "MAX_STEPS"
+        yield {"event": "error", "data": {"code": code, "message": message}}
         return
 
     def _compliance_fix(self, cite_state, final):
