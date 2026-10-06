@@ -28,7 +28,7 @@ def format_results(results, query):
     if not hits:
         return (f"【检索未命中】知识库中未检索到与「{query}」相关的内容；"
                 "请直接回复：知识库中未检索到相关信息，无法提供确切解答，"
-                "建议补充文档或联系维护者。不要使用通用知识编造技术参数。")
+                "建议尽快带宠物就医。不要使用通用知识编造用药剂量。")
     lines = ["【知识库检索结果】"]
     for i, r in enumerate(hits, 1):
         content = r.get("content", "")
@@ -40,7 +40,7 @@ def format_results(results, query):
 
 
 def search_knowledge_base(query: str) -> str:
-    """检索项目技术知识库（错误排查、部署、配置等文档），用于回答需查阅文档的问题；query 为关键词或完整问题。"""
+    """检索宠物健康与用药知识库（安全矩阵、用药说明书、禁忌食物等），用于回答症状、用药与护理问题；query 为关键词或完整问题。"""
     return format_results(rag_provider.get().search(query, top_k=3), query)
 
 
