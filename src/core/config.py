@@ -1,7 +1,8 @@
 """运行配置：从环境变量读取，提供合理默认值。"""
 import os
+from dotenv import load_dotenv
 
-
+load_dotenv()
 class Settings:
     def __init__(self):
         self.model = os.getenv("SENTINEL_MODEL", "gpt-4o-mini")
