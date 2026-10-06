@@ -29,7 +29,7 @@ def test_schema_structure():
     register_to(reg)
     fn = reg.get("search_knowledge_base").schema["function"]
     assert fn["name"] == "search_knowledge_base"
-    assert fn["description"].startswith("检索项目技术知识库")
+    assert fn["description"].startswith("检索宠物健康与用药知识库")
     assert fn["parameters"]["properties"]["query"]["type"] == "string"
     assert fn["parameters"]["required"] == ["query"]
 
