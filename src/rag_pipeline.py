@@ -46,6 +46,7 @@ def split_markdown(text: str, max_chunk: int = 800) -> list[dict]:
 
     返回 [{"title": "...", "content": "..."}]。
     - # 一级标题：作为文档级标题，不参与切分
+    - 文件开头的 > 引用块（数据来源/免责声明）：剥离，不单独成 chunk
     - ## 二级标题：主体切分点
     - ### 三级标题：留在所属 ## 块内
     - 无 ## 时整篇作为一个块（降级）
@@ -59,6 +60,10 @@ def split_markdown(text: str, max_chunk: int = 800) -> list[dict]:
     m = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
     if m:
         doc_title = m.group(1).strip()
+
+    # 剥离文件开头的 > 引用块（数据来源/免责声明），不参与切片
+    text = re.sub(r"^#\s+.+\n+", "", text, count=1)  # 去掉一级标题行
+    text = re.sub(r"^(>\s.*\n?)+", "", text).strip()  # 去掉连续 > 引用块
 
     # 按 ## 二级标题切分
     sections = re.split(r"\n(?=##\s+)", text)
