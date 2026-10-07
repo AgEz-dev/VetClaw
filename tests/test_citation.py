@@ -102,7 +102,7 @@ def make_agent(script, results, max_steps=5):
 
 def test_chitchat_no_tool():
     agent, pipe = make_agent(
-        [answer("你好呀，我是 Sentinel-Agent，可以帮你查文档、排查问题。")], [])
+        [answer("你好呀，我是 VetClaw，可以帮你查询宠物用药与急救知识。")], [])
     try:
         out = agent.run("你好")
         assert pipe.calls == []

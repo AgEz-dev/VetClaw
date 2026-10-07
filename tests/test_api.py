@@ -89,7 +89,7 @@ def test_stream_headers_and_tool_sequence():
 
 
 def test_chitchat_only_token_done():
-    set_agent(ReActAgent(ScriptedClientLike([answer("你好，我是 Sentinel-Agent。")]),
+    set_agent(ReActAgent(ScriptedClientLike([answer("你好，我是 VetClaw。")]),
                          ToolRegistry(), model="fake"))
     try:
         with TestClient(app) as c:
