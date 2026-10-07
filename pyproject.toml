@@ -1,7 +1,7 @@
 [project]
-name = "sentinel-agent"
-version = "0.1.0"
-description = "轻量自愈 Agent 与异步服务网关"
+name = "vetclaw"
+version = "2.0.0"
+description = "宠物健康分诊 Agent：Fast-Path 规则守卫 + RAG 混合检索 + 原生 ReAct 调度"
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.0.0",
@@ -10,6 +10,10 @@ dependencies = [
     "uvicorn[standard]>=0.29.0",
     "chromadb>=0.4.0",
     "httpx>=0.27.0",
+    "rank-bm25>=0.2.2",
+    "jieba>=0.42.1",
+    "sentence-transformers>=2.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -9,9 +9,10 @@ build/
 .venv/
 venv/
 
-# 环境变量与密钥（永远不要提交）
+# 环境变量与密钥（永远不要提交；保留 .env.example 模板）
 .env
 .env.*
+!.env.example
 
 # 缓存与工具
 .pytest_cache/

@@ -1,17 +1,17 @@
 services:
-  sentinel-agent:
+  vetclaw:
     build: .
-    container_name: sentinel-agent
+    container_name: vetclaw
     ports:
       - "8000:8000"
     volumes:
       - ./data:/app/data
     environment:
-      - SENTINEL_MODEL=${SENTINEL_MODEL:-gpt-4o-mini}
+      - VETCLAW_MODEL=${VETCLAW_MODEL:-gpt-4o-mini}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - SENTINEL_TIMEOUT=${SENTINEL_TIMEOUT:-15}
-      - SENTINEL_TOTAL_TIMEOUT=${SENTINEL_TOTAL_TIMEOUT:-30}
+      - VETCLAW_TIMEOUT=${VETCLAW_TIMEOUT:-15}
+      - VETCLAW_TOTAL_TIMEOUT=${VETCLAW_TOTAL_TIMEOUT:-30}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     env_file:
       - .env

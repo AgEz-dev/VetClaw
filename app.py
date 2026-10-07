@@ -1,4 +1,4 @@
-"""Sentinel-Agent FastAPI 入口。启动：uvicorn app:app --reload"""
+"""VetClaw FastAPI 入口。启动：uvicorn app:app --reload"""
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Sentinel-Agent", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="VetClaw", version="2.0.0", lifespan=lifespan)
 
 # CORS：allow_credentials=True 与 allow_origins=["*"] 冲突，白名单含 "*" 时自动关闭 credentials。
 allow_credentials = "*" not in settings.cors_origins

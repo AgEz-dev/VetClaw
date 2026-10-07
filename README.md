@@ -1,74 +1,99 @@
-# Sentinel-Agent
+# VetClaw
 
-面向开发调试场景的轻量自愈 Agent 与异步服务网关。
+宠物健康分诊 Agent：用户输入宠物误食 / 症状 / 用药问题，系统通过 **Fast-Path 规则守卫 + RAG 混合检索 + 原生 ReAct 调度**，输出带引用来源的专业回答，P0 急症 3ms 级拦截。
 
-## 概述
+> 零 LangChain：从零手写 ReAct 状态机、tool_calls 流式解析与 cite_state 防幻觉状态机，吃透 Agent 底层原理。
 
-在开发与调试场景中，定位、复现和修复问题往往需要跨多个信息源：本地代码、文档知识库、运行日志。Sentinel-Agent 将大模型接入一个自主调度循环，使其能够按需调用工具、检索私有知识库、观察执行结果并自我纠错，同时通过异步服务网关以流式方式对外提供能力，为构建智能开发助手类应用提供可扩展的底座。
+## 核心能力
+
+- **Fast-Path 前置守卫**：P0 致命毒物（百合 / 木糖醇 / 对乙酰氨基酚 / 葱属 / 布洛芬 / 葡萄）秒级拦截，基于 ChromaDB ID 点查直取急救 SOP + 毒物详情；未收录处方药（头孢 / 阿莫西林等）剂量咨询 100% 触发分诊引导
+- **RAG 混合检索**：结构感知 Markdown 切片 + BGE-small-zh-v1.5 本地向量 + BM25(jieba 医疗词典) 稀疏召回，RRF(k=60) 融合重排
+- **原生 ReAct 调度**：`_run_events()` 统一事件生成器同时驱动同步与流式；tool_calls 流式分片重组；双层超时（SDK read timeout + Agent 总时长守卫）
+- **防幻觉三层防护**：Prompt 契约 → `cite_state` 局部状态机（hit 不可被 miss 覆盖）→ 补正反馈；回答强制标注【来源：chunk_id】
+- **滑动窗口记忆**：按「assistant + tool_calls 原子块」裁剪，system prompt 预算保护
 
 ## 技术栈
 
-Python 3.11+ · FastAPI · 原生 ReAct 状态机 · ChromaDB · SSE · Ollama / 硅基流动云端 API
+| 层 | 技术 | 说明 |
+|---|---|---|
+| Web 框架 | FastAPI + Uvicorn | SSE 流式推送 |
+| Agent 调度 | 纯手写 ReAct（零 LangChain） | `_run_events()` 统一事件生成器 |
+| 向量库 | ChromaDB PersistentClient | 本地 SQLite 持久化，ID 点查 <3ms |
+| Embedding | BGE-small-zh-v1.5 | 本地模型，query/doc 前缀分离 |
+| 稀疏检索 | rank_bm25 + jieba | 中文分词，医疗实体词典 |
+| 融合 | RRF（k=60） | Dense + Sparse 双路融合 |
+| 规则守卫 | FastPathGuard | P0 急症拦截 + 未知处方药拒答 |
+| 记忆 | SlidingWindowMemory | 原子块裁剪，system prompt 保护 |
+| 部署 | Docker Compose | 数据卷挂载 `./data` |
 
-## 核心模块
+## 架构
 
-- **ReAct 循环调度器**：Thought → Action → Observation 的自主推理-行动循环
-- **Tool-Calling 注册表**：工具动态注册、JSON Schema 自动提取与安全确认机制
-- **RAG 混合检索**：BM25 + 向量召回，本地知识库语义检索
-- **滑动窗口记忆**：Token 预算控制，自动剔除旧轮次，防止上下文溢出
-- **SSE 流式推送**：思考过程、工具调用与最终答案逐字输出
-- **会话互斥锁**：并发会话下共享状态的隔离与保护
+三层架构（接入层 / 调度层 / 能力层）与关键技术决策见 [docs/architecture.md](docs/architecture.md)。
 
 ## 项目结构
 
 ```text
-ai-agent-study/
-├── README.md            # 项目说明
-├── .gitignore
-├── pyproject.toml       # 依赖与工程配置
-├── src/                 # 核心实现（Agent 调度器）
-│   └── core_agent.py
-├── schemas/             # Pydantic 请求/响应模型
-├── tests/               # 测试
-├── docs/
-│   └── architecture.md  # 架构说明
-├── datasets/            # 数据集
-├── benchmarks/          # 评测
-├── knowledge/           # 知识库语料
-└── data/                # 运行时数据（向量库等）
+VetClaw/
+├── app.py                    # FastAPI 入口，lifespan 预热
+├── src/
+│   ├── core_agent.py         # ReAct 调度核心（_run_events 生成器）
+│   ├── tools.py              # inspect 反射 ToolRegistry
+│   ├── memory.py             # 滑动窗口原子块裁剪
+│   ├── rag_pipeline.py       # 切片 + BGE + BM25 + RRF 混合检索
+│   ├── fastpath.py           # Fast-Path 规则守卫
+│   ├── knowledge_tool.py     # RAG 工具适配层（依赖注入）
+│   ├── api.py                # POST /api/chat/stream SSE 路由
+│   ├── core/config.py        # Settings + .env 加载
+│   └── services/agent_service.py  # Agent 单例装配
+├── rules/fastpath_rules.json # P0 毒物库 + 药品白名单 + watchlist
+├── knowledge/                # 权威医疗文档（17 chunks）
+├── tests/                    # 单元测试 + eval_dataset.json
+├── scripts/
+│   ├── ingest_docs.py        # 入库脚本（默认 upsert，--rebuild 重建）
+│   └── evaluate_rag.py       # 评测脚本（Recall@3 / MRR / 拒答率）
+├── web/index.html            # 单文件原生前端
+└── data/chroma/              # ChromaDB 持久化（.gitignore 忽略）
 ```
 
-## 架构
+## 当前成绩单（V2.0）
 
-三层架构设计与关键技术决策见 [docs/architecture.md](docs/architecture.md)。
-
-## 开发状态
-
-- [x] 工程脚手架
-- [ ] 核心调度层（ReAct 循环、工具注册表、滑动窗口记忆）
-- [ ] 能力层（RAG 检索、代码阅读工具）
-- [ ] 接入层（FastAPI 网关、SSE 流式）
-- [ ] 容器化部署
+| 指标 | 数值 |
+|---|---|
+| 单元测试 | **59 全绿** |
+| Pure RAG Recall@3 | **100%** (4/4) |
+| 处方药拒答率 | **100%** (3/3) |
+| System Pass Rate | **12/12 (100%)** |
+| Fast-Path 拦截 TTFB | **3.2ms** |
+| BM25 冷启动重建 | 13ms（17 chunks） |
 
 ## 快速开始
 
 ```powershell
-# 1. 创建虚拟环境
-python -m venv .venv
+# 0. 设置 HuggingFace 镜像（国内拉取 BGE 模型必须）
+$env:HF_ENDPOINT = "https://hf-mirror.com"
 
-# 2. 激活（Windows）
-.venv\Scripts\activate
+# 1. 安装依赖（Python 3.11+）
+pip install -e .
 
-# 3. 安装依赖（含开发依赖）
-pip install -e ".[dev]"
+# 2. 配置模型 API：复制 .env.example 为 .env，填入 OPENAI_API_KEY / OPENAI_BASE_URL
 
-# 4. 配置模型 API
-#    Ollama 本地：设置 OPENAI_BASE_URL=http://localhost:11434/v1
-#    硅基流动：设置 OPENAI_BASE_URL=https://api.siliconflow.cn/v1 与 OPENAI_API_KEY
-#    也可在项目根目录创建 .env 文件（已被 .gitignore 忽略）
+# 3. 启动后端
+uvicorn app:app --port 8000 --reload
 
-# 5. 运行测试
-pytest
+# 4. 运行测试 / 评测
+pytest tests/ -q
+python -m scripts.evaluate_rag
+
+# 5. 知识库入库（默认 upsert；--rebuild 清空重灌）
+python -m scripts.ingest_docs
 ```
 
-> 运行入口将在核心调度层完成后补充。
+## 部署
+
+```powershell
+docker compose up -d
+```
+
+## 仓库
+
+<https://github.com/AgEz-dev/VetClaw>
