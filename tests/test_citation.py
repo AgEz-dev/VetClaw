@@ -107,7 +107,7 @@ def test_chitchat_no_tool():
         out = agent.run("你好")
         assert pipe.calls == []
         assert "你好" in out
-        assert "【来源：" not in out and "无法提供确切解答" not in out
+        assert "【来源：" not in out and "不会凭空推测用药剂量" not in out
     finally:
         rag_provider.set(None)
 
@@ -128,7 +128,7 @@ def test_miss_degrade():
     agent, pipe = make_agent(script, [])
     try:
         out = agent.run("集群参数怎么配")
-        assert "无法提供确切解答" in out and "【来源：" not in out
+        assert "不会凭空推测用药剂量" in out and "【来源：" not in out
         assert pipe.calls[0] == ("集群参数", 3)  # 检索词取自模型 tool_call，非用户原话
     finally:
         rag_provider.set(None)
@@ -157,7 +157,7 @@ def test_miss_postcheck_degrade():
     agent, _ = make_agent(script, [])
     try:
         out = agent.run("配额多少")
-        assert "无法提供确切解答" in out and "100" not in out
+        assert "不会凭空推测用药剂量" in out and "100" not in out
     finally:
         rag_provider.set(None)
 
@@ -185,7 +185,7 @@ def test_timeout_none_step_message():
     script = [tool_call("echo", {"text": "x"}, cid=f"c{i}") for i in range(5)]
     out = ReActAgent(ScriptedClient(script), reg, model="fake",
                      max_steps=5).run("x")
-    assert "最大步数 5" in out and "无法提供确切解答" not in out
+    assert "最大步数 5" in out and "不会凭空推测用药剂量" not in out
 
 
 def test_missing_distance_still_hit():
@@ -230,6 +230,15 @@ def test_custom_hit_state_not_overwritten():
     assert [m["tool_call_id"] for m in tool_msgs] == ["c1", "c2"]  # 两工具同轮均回填
 
 
+def test_degrade_structure():
+    """分诊引导模式必须包含三要素：不臆测剂量 + 牙龈/呼吸自查 + 带药盒就医。"""
+    assert "不会凭空推测用药剂量" in DEGRADE_ANSWER
+    assert "牙龈" in DEGRADE_ANSWER
+    assert "呼吸" in DEGRADE_ANSWER
+    assert "药盒" in DEGRADE_ANSWER
+    assert "联系维护者" not in DEGRADE_ANSWER
+
+
 if __name__ == "__main__":
     test_chitchat_no_tool()
     test_hit_with_citation()
@@ -240,4 +249,5 @@ if __name__ == "__main__":
     test_timeout_none_step_message()
     test_missing_distance_still_hit()
     test_custom_hit_state_not_overwritten()
+    test_degrade_structure()
     print("全部断言通过")

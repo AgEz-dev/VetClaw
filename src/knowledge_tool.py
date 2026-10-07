@@ -27,8 +27,9 @@ def format_results(results, query):
     hits = [r for r in results if r.get("distance", 0.0) <= MAX_DISTANCE]
     if not hits:
         return (f"【检索未命中】知识库中未检索到与「{query}」相关的内容；"
-                "请直接回复：知识库中未检索到相关信息，无法提供确切解答，"
-                "建议尽快带宠物就医。不要使用通用知识编造用药剂量。")
+                "请直接进入风险排查引导：告知该成分不在已收录文档中、不推测剂量，"
+                "引导用户自查牙龈颜色/呼吸频率、核对药盒是否含对乙酰氨基酚/木糖醇等已知剧毒成分，"
+                "并建议带原药盒就医。不要使用通用知识编造用药剂量。")
     lines = ["【知识库检索结果】"]
     for i, r in enumerate(hits, 1):
         content = r.get("content", "")

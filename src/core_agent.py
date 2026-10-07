@@ -10,24 +10,30 @@ logger = logging.getLogger(__name__)
 CITATION_MARK = "【来源："
 HIT_MARK = "【知识库检索结果】"
 MISS_MARK = "【检索未命中】"
-DEGRADE_ANSWER = "知识库中未检索到相关信息，无法提供确切解答，建议尽快带宠物就医。"
+DEGRADE_ANSWER = (
+    "该情况不在我已收录的官方说明书与安全矩阵范围内，我不会凭空推测用药剂量。"
+    "请先做以下现场排查：1) 观察宠物牙龈颜色（粉红/发白/发青）与静息呼吸频率；"
+    "2) 核对药盒成分表是否含对乙酰氨基酚、木糖醇、葱属精油等已知犬猫剧毒成分；"
+    "3) 记录误食时间与估计剂量。请携带原药盒与上述体征数据尽快前往宠物医院急诊。"
+)
 CITATION_RE = re.compile(r"【来源：[^】]+】")
 
-DEFAULT_SYSTEM_PROMPT = """你是 VetClaw，一个宠物健康分诊助手。你可以查阅宠物安全矩阵与官方用药说明书知识库，回答常见症状、用药禁忌与护理建议。严格遵守：
+DEFAULT_SYSTEM_PROMPT = """你是 VetClaw，一个宠物健康分诊助手。你可以查阅宠物安全矩阵、家庭急救与官方用药说明书知识库，回答常见症状、用药禁忌与护理建议。严格遵守：
 
 1. 闲聊或自我介绍（如"你好""你能做什么"）：直接自然回答，不要调用工具。
-2. 涉及宠物健康、症状判断、用药剂量、禁忌食物的问题：必须先调用
+2. 涉及宠物健康、症状判断、用药剂量、禁忌食物、急救处理的问题：必须先调用
    search_knowledge_base，再仅依据检索结果回答。
 3. 引用：凡依据检索结果给出的事实，句末必须标注来源，格式为【来源：<chunk_id>】，
-   chunk_id 形如 knowledge/safety-matrix.md#1；多条依据分别标注。
+   chunk_id 形如 knowledge/species_drug_safety_matrix.md#对乙酰氨基酚-2；多条依据分别标注。
 4. 防幻觉：只能使用检索片段中的信息，不得补充片段之外的用药剂量、成分或推测。
-   检索为空或收到【检索未命中】时，直接回复：
-   "知识库中未检索到相关信息，无法提供确切解答，建议尽快带宠物就医。"
+   检索为空或收到【检索未命中】时，不要只说"无法回答"，而要进入风险排查引导：
+   明确告知该成分不在已收录文档中、不推测剂量，然后引导用户自查牙龈颜色/呼吸频率、
+   核对药盒是否含对乙酰氨基酚/木糖醇等已知剧毒成分，并建议带原药盒就医。
 5. 安全声明：每次回答末尾必须提醒"以上建议仅供参考，不能替代执业兽医诊断，紧急情况请立即就医"。
 
 示例：
 问：狗狗能吃巧克力吗？
-答：巧克力对狗狗有毒，含可可碱会引起呕吐、心跳加速甚至抽搐，必须立即远离并就医【来源：knowledge/safety-matrix.md#2】。
+答：巧克力对狗狗有毒，含可可碱会引起呕吐、心跳加速甚至抽搐，必须立即远离并就医【来源：knowledge/species_drug_safety_matrix.md#对乙酰氨基酚-2】。
 以上建议仅供参考，不能替代执业兽医诊断，紧急情况请立即就医。
 """
 
@@ -35,17 +41,15 @@ DEFAULT_SYSTEM_PROMPT = """你是 VetClaw，一个宠物健康分诊助手。你
 class ReActAgent:
     def __init__(self, client, registry, model="gpt-4o-mini",
                  max_steps=5, system_prompt=DEFAULT_SYSTEM_PROMPT,
-                 clock=None, total_timeout=30.0):
+                 clock=None, total_timeout=30.0, fastpath_guard=None):
         self.client = client
         self.registry = registry
         self.model = model
         self.max_steps = max_steps
         self.system_prompt = system_prompt
-        # 可注入时钟：生产用 time.monotonic，测试注入假时钟可 0ms 跑完超时拦截。
         self._clock = clock or time.monotonic
-        # 总时长守卫：整个 _run_events 生命周期共用一个 start，含多轮模型调用与工具执行。
-        # SDK 层 timeout=15s 防单次 read 挂死；Agent 层 total_timeout=30s 防整体跑飞。
         self.total_timeout = total_timeout
+        self.guard = fastpath_guard
 
     def run(self, prompt, history=None):
         # 消费统一事件流：done 取 answer、error 取 message，与流式行为 100% 一致。
@@ -60,11 +64,21 @@ class ReActAgent:
         yield from self._run_events(prompt, history)
 
     def _run_events(self, prompt, history=None):
-        # cite_state 为生成器内局部状态、随每次调用新建，严禁挂 self，杜绝跨请求污染。
-        # 已知边界：技术问题若模型自行跳过检索（cite_state 始终 None），单 Agent 无法
-        # 拦截，属 Prompt 规划层问题；后续靠微调或独立 Router 分类解决。
         cite_state = None
-        start = self._clock()  # 全局总超时起点：多轮模型调用 + 工具执行都计入
+        start = self._clock()
+
+        # Fast-Path 规则守卫：P0 急症与未知处方药在入口秒级拦截，不调 LLM
+        if self.guard is not None:
+            hit = self.guard.check(prompt)
+            if hit["action"] == "emergency":
+                msg = self.guard.emergency_message(hit["toxin"], hit["species"])
+                yield {"event": "done", "data": {"answer": msg, "citations": []}}
+                return
+            if hit["action"] == "refuse":
+                msg = self.guard.refuse_message(hit["drug_hint"])
+                yield {"event": "done", "data": {"answer": msg, "citations": []}}
+                return
+
         messages = [{"role": "system", "content": self.system_prompt}]
         if history:
             messages.extend(history)
@@ -159,7 +173,7 @@ class ReActAgent:
         if cite_state == "hit" and CITATION_MARK not in final:
             return (f"【系统校验】回答缺少{CITATION_MARK}...】来源标注，"
                     "请仅基于上述检索结果重写，并在每条事实句末标注来源。")
-        if cite_state == "miss" and "无法提供确切解答" not in final:
+        if cite_state == "miss" and "不会凭空推测用药剂量" not in final:
             return (f"【系统校验】检索未命中，请直接回复：{DEGRADE_ANSWER}"
                     " 不要用通用知识编造。")
         return None

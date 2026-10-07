@@ -1,0 +1,88 @@
+{
+  "cases": [
+    {
+      "id": "E01",
+      "query": "猫误食了百合花怎么办",
+      "expected_source_chunk": "knowledge/species_drug_safety_matrix.md#百合属-Lilium-Hemerocallis-所有部位-4",
+      "must_contain_keywords": ["百合", "肾"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E02",
+      "query": "狗吃了无糖口香糖里面有木糖醇",
+      "expected_source_chunk": "knowledge/species_drug_safety_matrix.md#木糖醇-无糖口香糖-代糖-3",
+      "must_contain_keywords": ["木糖醇", "低血糖"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E03",
+      "query": "猫偷吃了人用感冒药泰诺里面有扑热息痛",
+      "expected_source_chunk": "knowledge/species_drug_safety_matrix.md#对乙酰氨基酚-扑热息痛-泰诺-1",
+      "must_contain_keywords": ["猫", "高铁血红蛋白"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E04",
+      "query": "狗体温 40.5 度算不算发烧",
+      "expected_source_chunk": "knowledge/home_care_and_first_aid.md#三大生命体征正常区间与红线-0",
+      "must_contain_keywords": ["体温", "39.2"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E05",
+      "query": "宠物误食毒物后多久内送医效果最好",
+      "expected_source_chunk": "knowledge/species_drug_safety_matrix.md#现场急救通用-SOP-所有毒物中毒通用-0",
+      "must_contain_keywords": ["2 小时", "黄金"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E06",
+      "query": "狗吃了洋葱后来尿色变红是怎么回事",
+      "expected_source_chunk": "knowledge/species_drug_safety_matrix.md#葱属植物-洋葱-大蒜-韭菜-大葱-5",
+      "must_contain_keywords": ["溶血", "洋葱"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E07",
+      "query": "塞拉菌素大宠爱出生几周的小狗可以用",
+      "expected_source_chunk": "knowledge/common_parasite_drugs.md#塞拉菌素-大宠爱-Revolution-1",
+      "must_contain_keywords": ["6 周龄", "塞拉菌素"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E08",
+      "query": "柯利犬能不能用爱沃克莫昔克丁",
+      "expected_source_chunk": "knowledge/common_parasite_drugs.md#吡虫啉-莫昔克丁-爱沃克-Advocate-5",
+      "must_contain_keywords": ["柯利", "MDR1"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E09",
+      "query": "猫只是舔到了百合花上面的花粉有没有事",
+      "expected_source_chunk": "knowledge/species_drug_safety_matrix.md#百合属-Lilium-Hemerocallis-所有部位-4",
+      "must_contain_keywords": ["花粉", "猫"],
+      "expected_behavior": "answer"
+    },
+    {
+      "id": "E10",
+      "query": "人用头孢氨苄给狗一次吃多少毫克",
+      "expected_source_chunk": null,
+      "must_contain_keywords": [],
+      "expected_behavior": "refuse"
+    },
+    {
+      "id": "E11",
+      "query": "猫阿莫西林中毒了剂量是多少怎么解",
+      "expected_source_chunk": null,
+      "must_contain_keywords": [],
+      "expected_behavior": "refuse"
+    },
+    {
+      "id": "E12",
+      "query": "狗狗软便吃什么益生菌调理",
+      "expected_source_chunk": null,
+      "must_contain_keywords": [],
+      "expected_behavior": "refuse"
+    }
+  ]
+}
