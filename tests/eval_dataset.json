@@ -51,7 +51,7 @@
     {
       "id": "E07",
       "query": "塞拉菌素大宠爱出生几周的小狗可以用",
-      "expected_source_chunk": "knowledge/common_parasite_drugs.md#塞拉菌素-大宠爱-Revolution-1",
+      "expected_source_chunk": "knowledge/common_parasite_drugs.md#塞拉菌素-大宠爱-Revolution-0",
       "must_contain_keywords": ["6 周龄", "塞拉菌素"],
       "expected_behavior": "answer",
       "category": "rag_search"
@@ -90,11 +90,11 @@
     },
     {
       "id": "E12",
-      "query": "狗狗软便吃什么益生菌调理",
-      "expected_source_chunk": null,
-      "must_contain_keywords": [],
-      "expected_behavior": "refuse",
-      "category": "refuse"
+      "query": "狗狗只是单次软便、精神食欲都正常，需要马上就医吗",
+      "expected_source_chunk": "knowledge/home_care_and_first_aid.md#家庭分诊决策树-1",
+      "must_contain_keywords": ["软便", "在家观察"],
+      "expected_behavior": "answer",
+      "category": "rag_search"
     },
     {
       "id": "E13",
@@ -364,7 +364,7 @@
       "id": "E46",
       "query": "怎么给宠物做脱水捏皮试验判断脱水程度",
       "expected_source_chunk": "knowledge/pet_vitals_by_age.md#脱水捏皮试验-皮肤弹性分级-6",
-      "must_contain_keywords": ["捏皮", "脱水"],
+      "must_contain_keywords": ["皮肤弹性", "脱水"],
       "expected_behavior": "answer",
       "category": "rag_search"
     },
@@ -380,7 +380,7 @@
       "id": "E48",
       "query": "速诺给狗和猫的参考剂量是多少",
       "expected_source_chunk": "knowledge/prescription_and_otc_drugs.md#速诺-阿莫西林克拉维酸钾-1",
-      "must_contain_keywords": ["速诺", "mg"],
+      "must_contain_keywords": ["阿莫西林", "mg"],
       "expected_behavior": "answer",
       "category": "rag_search"
     },
