@@ -1,6 +1,7 @@
 """Sentinel-Agent FastAPI 入口。启动：uvicorn app:app --reload"""
 import logging
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).parent
@@ -16,7 +17,23 @@ from core.config import settings  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Sentinel-Agent", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动预热：把 BGE 模型加载、jieba 字典构建、ChromaDB 连接建立都消化在启动阶段
+    logging.info("Warming up: loading BGE model + jieba dict + ChromaDB...")
+    try:
+        from rag_pipeline import RAGPipeline, BGEEmbeddingFunction
+        from services.agent_service import get_agent
+        RAGPipeline(embedding_function=BGEEmbeddingFunction())
+        get_agent()  # 触发 build_agent()，加载模型 + 构建 BM25
+        logging.info("Warm-up complete.")
+    except Exception as e:
+        logging.warning("Warm-up skipped: %s", e)
+    yield
+
+
+app = FastAPI(title="Sentinel-Agent", version="0.1.0", lifespan=lifespan)
 
 # CORS：allow_credentials=True 与 allow_origins=["*"] 冲突，白名单含 "*" 时自动关闭 credentials。
 allow_credentials = "*" not in settings.cors_origins
