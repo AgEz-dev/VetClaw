@@ -1,4 +1,8 @@
 {
+  "_notes": {
+    "drug_whitelist_decision": "显式决策：knowledge/prescription_and_otc_drugs.md 中给出参考剂量的药物（速诺/阿莫西林克拉维酸钾、甲硝唑、多西环素、拜宠清、福来恩）已加入 drug_whitelist，使系统能够回答这些已收录说明书的剂量问题。甲硝唑原在 unlisted_drugs_watchlist 中，因新文档已收录其说明书剂量，已从 watchlist 移入 whitelist，避免自相矛盾。未收录的人用药（阿奇霉素、庆大霉素、阿司匹林等）仍留在 watchlist，命中剂量词即拒答。",
+    "p0_toxins_note": "新增毒物（巧克力/灭鼠药/绿萝/滴水观音）的 chunk_id 均取自 ingest --rebuild 后导出的真实 id。葱属/葡萄/百合/木糖醇/对乙酰氨基酚/布洛芬沿用原有条目，不重复收录。"
+  },
   "p0_toxins": [
     {"name": "百合", "species": ["猫"], "keywords": ["百合", "lily", "花粉", "花瓶水"],
      "chunk_id": "knowledge/species_drug_safety_matrix.md#百合属-Lilium-Hemerocallis-所有部位-4"},
@@ -11,17 +15,30 @@
     {"name": "布洛芬", "species": ["狗", "猫"], "keywords": ["布洛芬", "芬必得", "ibuprofen"],
      "chunk_id": "knowledge/species_drug_safety_matrix.md#布洛芬-异丁苯丙酸-芬必得-2"},
     {"name": "葡萄", "species": ["狗"], "keywords": ["葡萄", "葡萄干", "raisin"],
-     "chunk_id": "knowledge/species_drug_safety_matrix.md#葡萄与葡萄干-6"}
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#葡萄与葡萄干-6"},
+    {"name": "巧克力", "species": ["狗", "猫"], "keywords": ["巧克力", "可可碱", "可可粉", "可可", "chocolate", "theobromine"],
+     "chunk_id": "knowledge/toxic_substances_handbook.md#巧克力与可可碱中毒-0"},
+    {"name": "灭鼠药", "species": ["狗", "猫"], "keywords": ["灭鼠药", "老鼠药", "鼠药", "溴敌隆", "大隆", "溴鼠灵", "杀鼠灵", "敌鼠", "rodenticide"],
+     "chunk_id": "knowledge/toxic_substances_handbook.md#抗凝血类灭鼠药中毒-6"},
+    {"name": "绿萝", "species": ["猫", "狗"], "keywords": ["绿萝", "黄金葛", "pothos", "epipremnum"],
+     "chunk_id": "knowledge/toxic_substances_handbook.md#绿萝-绿萝属-Epipremnum-aureum-中毒-2"},
+    {"name": "滴水观音", "species": ["猫", "狗"], "keywords": ["滴水观音", "海芋", "姑婆芋", "alocasia"],
+     "chunk_id": "knowledge/toxic_substances_handbook.md#滴水观音-海芋-Alocasia-macrorrhizos-中毒-4"}
   ],
   "sop_chunk_id": "knowledge/species_drug_safety_matrix.md#现场急救通用-SOP-所有毒物中毒通用-0",
   "species_words": ["猫", "狗", "犬"],
   "action_regex": "(吃|吞|舔|咬|碰|误食|啃|中毒|抽搐|呕吐|尿血|流涎)",
   "consult_pattern": "(能吃|可以吃|能不能吃|可以吃吗|能吃吗|吗$|吗[？?])",
-  "drug_whitelist": ["塞拉菌素", "大宠爱", "revolution", "吡虫啉", "莫昔克丁", "爱沃克", "advocate"],
+  "drug_whitelist": [
+    "塞拉菌素", "大宠爱", "revolution", "吡虫啉", "莫昔克丁", "爱沃克", "advocate",
+    "速诺", "阿莫西林克拉维酸钾", "克拉维酸", "甲硝唑", "多西环素",
+    "拜宠清", "福来恩", "非泼罗尼", "吡喹酮", "非班太尔"
+  ],
   "unlisted_drugs_watchlist": [
-    "阿莫西林", "头孢", "甲硝唑", "庆大霉素", "土霉素",
-    "阿司匹林", "罗红霉素", "左氧氟沙星", "氯雷他定",
-    "感冒通", "速效", "白加黑", "感康"
+    "阿莫西林", "头孢", "头孢氨苄", "头孢克肟", "头孢拉定", "阿奇霉素",
+    "庆大霉素", "土霉素", "阿司匹林", "罗红霉素", "左氧氟沙星", "诺氟沙星",
+    "环丙沙星", "氯雷他定", "西替利嗪", "感冒通", "速效", "白加黑", "感康",
+    "999感冒灵", "地塞米松", "泼尼松", "奥美拉唑", "蒙脱石散"
   ],
   "dosage_words": ["剂量", "用量", "吃多少", "怎么用", "用法", "毫克", "mg", "毫升", "ml", "一次", "每天", "周龄", "多大能用"]
 }
