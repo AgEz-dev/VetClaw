@@ -9,13 +9,20 @@ _agent = None
 def build_agent():
     from openai import OpenAI
     from core.config import settings
+    from fastpath import FastPathGuard
+    from rag_pipeline import RAGPipeline, BGEEmbeddingFunction
+    from knowledge_tool import rag_provider
     kwargs = {"timeout": settings.timeout}
     if settings.base_url:
         kwargs["base_url"] = settings.base_url
     if settings.api_key:
         kwargs["api_key"] = settings.api_key
+    pipeline = RAGPipeline(embedding_function=BGEEmbeddingFunction())
+    rag_provider.set(pipeline)
+    guard = FastPathGuard(pipeline=pipeline)
     return ReActAgent(OpenAI(**kwargs), registry, model=settings.model,
-                      total_timeout=settings.total_timeout)
+                      total_timeout=settings.total_timeout,
+                      fastpath_guard=guard)
 
 
 def get_agent():

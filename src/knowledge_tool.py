@@ -15,8 +15,8 @@ class RAGProvider:
 
     def get(self):
         if self._pipeline is None:
-            # 暂不加锁：当前单线程/单事件循环场景够用；多线程并发初始化需加锁
-            self._pipeline = RAGPipeline()
+            from rag_pipeline import RAGPipeline, BGEEmbeddingFunction
+            self._pipeline = RAGPipeline(embedding_function=BGEEmbeddingFunction())
         return self._pipeline
 
 
