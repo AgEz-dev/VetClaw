@@ -1,0 +1,27 @@
+{
+  "p0_toxins": [
+    {"name": "百合", "species": ["猫"], "keywords": ["百合", "lily", "花粉", "花瓶水"],
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#百合属-Lilium-Hemerocallis-所有部位-4"},
+    {"name": "对乙酰氨基酚", "species": ["猫", "狗"], "keywords": ["对乙酰氨基酚", "扑热息痛", "泰诺", "paracetamol"],
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#对乙酰氨基酚-扑热息痛-泰诺-1"},
+    {"name": "木糖醇", "species": ["狗"], "keywords": ["木糖醇", "xylitol", "无糖口香糖"],
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#木糖醇-无糖口香糖-代糖-3"},
+    {"name": "葱属", "species": ["狗", "猫"], "keywords": ["洋葱", "大蒜", "韭菜", "大葱"],
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#葱属植物-洋葱-大蒜-韭菜-大葱-5"},
+    {"name": "布洛芬", "species": ["狗", "猫"], "keywords": ["布洛芬", "芬必得", "ibuprofen"],
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#布洛芬-异丁苯丙酸-芬必得-2"},
+    {"name": "葡萄", "species": ["狗"], "keywords": ["葡萄", "葡萄干", "raisin"],
+     "chunk_id": "knowledge/species_drug_safety_matrix.md#葡萄与葡萄干-6"}
+  ],
+  "sop_chunk_id": "knowledge/species_drug_safety_matrix.md#现场急救通用-SOP-所有毒物中毒通用-0",
+  "species_words": ["猫", "狗", "犬"],
+  "action_regex": "(吃|吞|舔|咬|碰|误食|啃|中毒|抽搐|呕吐|尿血|流涎)",
+  "consult_pattern": "(能吃|可以吃|能不能吃|可以吃吗|能吃吗|吗$|吗[？?])",
+  "drug_whitelist": ["塞拉菌素", "大宠爱", "revolution", "吡虫啉", "莫昔克丁", "爱沃克", "advocate"],
+  "unlisted_drugs_watchlist": [
+    "阿莫西林", "头孢", "甲硝唑", "庆大霉素", "土霉素",
+    "阿司匹林", "罗红霉素", "左氧氟沙星", "氯雷他定",
+    "感冒通", "速效", "白加黑", "感康"
+  ],
+  "dosage_words": ["剂量", "用量", "吃多少", "怎么用", "用法", "毫克", "mg", "毫升", "ml", "一次", "每天", "周龄", "多大能用"]
+}

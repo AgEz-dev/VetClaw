@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from rag_pipeline import RAGPipeline, BGEEmbeddingFunction
+from fastpath import FastPathGuard
 
 MAX_DISTANCE = 0.45  # cosine 距离 > 此值视为未命中
 
@@ -18,16 +19,34 @@ def main():
     ds = json.loads(Path("tests/eval_dataset.json").read_text(encoding="utf-8"))
     pipe = RAGPipeline("data/chroma", "knowledge",
                        embedding_function=BGEEmbeddingFunction())
+    guard = FastPathGuard()
 
-    hits = 0          # Recall@3 分子
+    hits = 0
     reciprocal_sum = 0.0
     refuse_pass = 0
-    total = len(ds["cases"])
+    rag_answer_cases = 0  # 走 RAG 的 answer case 数（被 guard 拦截的不算）
     rows = []
 
     for case in ds["cases"]:
         q = case["query"]
         expect = case["expected_behavior"]
+
+        # Fast-Path 前置拦截
+        gp = guard.check(q)
+        if gp["action"] == "refuse":
+            if expect == "refuse":
+                refuse_pass += 1
+                rows.append((case["id"], "PASS", f"guard refused: {gp['drug_hint']}", q))
+            else:
+                rows.append((case["id"], "FALSE-GUARD", "expected answer but guard blocked", q))
+            continue
+        if gp["action"] == "emergency":
+            rows.append((case["id"], "PASS", f"P0 emergency: {gp['toxin']}", q))
+            continue
+
+        if expect == "answer":
+            rag_answer_cases += 1
+
         results = pipe.search(q, top_k=3)
 
         if expect == "answer":
@@ -64,11 +83,12 @@ def main():
     print("-" * 70)
     answer_cases = [c for c in ds["cases"] if c["expected_behavior"] == "answer"]
     refuse_cases = [c for c in ds["cases"] if c["expected_behavior"] == "refuse"]
-    recall = hits / len(answer_cases) if answer_cases else 0
-    mrr = reciprocal_sum / len(answer_cases) if answer_cases else 0
+    recall = hits / rag_answer_cases if rag_answer_cases else 0
+    mrr = reciprocal_sum / rag_answer_cases if rag_answer_cases else 0
     refuse_rate = refuse_pass / len(refuse_cases) if refuse_cases else 0
-    print(f"Answer cases:  {len(answer_cases)}")
-    print(f"Recall@3:      {recall:.2%}  ({hits}/{len(answer_cases)})")
+    print(f"Answer cases (total): {len(answer_cases)}")
+    print(f"Answer cases (via RAG): {rag_answer_cases}")
+    print(f"Recall@3:      {recall:.2%}  ({hits}/{rag_answer_cases})")
     print(f"MRR@3:         {mrr:.3f}")
     print(f"Refuse cases:  {len(refuse_cases)}")
     print(f"Refuse rate:   {refuse_rate:.2%}  ({refuse_pass}/{len(refuse_cases)})")
