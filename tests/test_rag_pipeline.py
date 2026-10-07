@@ -113,14 +113,19 @@ def test_rrf_fuse_basic():
 
 
 def test_bm25_keyword_search():
+    """BM25 关键词召回。语料必须 >= 3 篇：N=2 且 df=1 时 BM25Okapi 的
+    IDF 恒为 ln(1.5)-ln(1.5)=0，得分必为 0，属数学退化而非代码缺陷。"""
     db = Path("data/_test_bm25")
     f1, f2 = Path("data/_bm25a.md"), Path("data/_bm25b.md")
+    f3 = Path("data/_bm25c.md")
     f1.write_text("# 文档A\n\n宠物误食毒物后送医时间窗口与急救方案", encoding="utf-8")
     f2.write_text("# 文档B\n\n犬猫体温正常区间与发烧判断标准", encoding="utf-8")
+    f3.write_text("# 文档C\n\n前端浏览器兼容性与渲染性能优化", encoding="utf-8")
     try:
         p = RAGPipeline(str(db), embedding_function=FakeEmbedding())
         p.ingest(str(f1))
         p.ingest(str(f2))
+        p.ingest(str(f3))
         sparse = p._bm25_search("送医", top_k=3)
         assert len(sparse) >= 1
         assert "送医" in sparse[0]["content"]
@@ -128,6 +133,7 @@ def test_bm25_keyword_search():
         shutil.rmtree(db, ignore_errors=True)
         f1.unlink(missing_ok=True)
         f2.unlink(missing_ok=True)
+        f3.unlink(missing_ok=True)
 
 
 def test_bm25_recovery_after_restart():

@@ -42,15 +42,21 @@ class FastPathGuard:
 
         return {"action": "pass"}
 
-    def emergency_message(self, toxin: str, species: str, chunk_id: str) -> str:
-        """从 ChromaDB 点查 SOP chunk + 毒物 chunk 拼接（<3ms，不走 embedding）。"""
+    def emergency_message(self, toxin: str, species: str,
+                          chunk_id: str | None = None) -> str:
+        """从 ChromaDB 点查 SOP chunk + 毒物 chunk 拼接（<3ms，不走 embedding）。
+
+        向后兼容防御：chunk_id 为 None（规则缺失或旧调用方未传）时，
+        优雅降级为通用警报（仅 SOP + 免责声明），不抛异常。
+        """
         sop = self._fetch(self.rules["sop_chunk_id"])
-        detail = self._fetch(chunk_id)
         parts = [f"【P0 急症预警】检测到{species}可能接触{toxin}。"]
         if sop:
             parts.append(sop)
-        if detail:
-            parts.append(f"---\n关于{toxin}的详细信息：\n{detail}")
+        if chunk_id:
+            detail = self._fetch(chunk_id)
+            if detail:
+                parts.append(f"---\n关于{toxin}的详细信息：\n{detail}")
         parts.append("\n⚠️ 以上建议仅供参考，不能替代执业兽医诊断，紧急情况请立即就医。")
         return "\n\n".join(parts)
 
