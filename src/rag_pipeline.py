@@ -5,12 +5,28 @@
 - BGEEmbeddingFunction：本地 BGE-small-zh-v1.5，query/doc 前缀分离
 """
 import re
+import time
 from pathlib import Path
 
 import chromadb
 from chromadb import EmbeddingFunction
 
 SEPARATORS = ["\n\n", "\n", "。", " "]
+
+# 医疗专有名词词典（模块级常量，幂等注册一次）
+_MED_TERMS = ["对乙酰氨基酚", "塞拉菌素", "莫昔克丁", "吡虫啉",
+              "大宠爱", "爱沃克", "木糖醇", "葡萄", "百合",
+              "驱虫药", "急救", "送医", "误食"]
+
+
+def _ensure_jieba_terms():
+    """幂等注册医疗专有名词到 jieba 词典（只注册一次，重复调用无副作用）。"""
+    try:
+        import jieba
+    except ImportError:
+        return
+    for w in _MED_TERMS:
+        jieba.add_word(w)
 
 
 def split_text(text: str, chunk_size: int = 500, chunk_overlap: int = 50) -> list[str]:
@@ -160,6 +176,30 @@ class RAGPipeline:
             embedding_function=embedding_function,
             metadata={"hnsw:space": "cosine"},
         )
+        self._build_bm25()
+
+    def _build_bm25(self):
+        """从 ChromaDB 加载全量文档，构建 BM25 稀疏索引。"""
+        t0 = time.monotonic()
+        try:
+            from rank_bm25 import BM25Okapi
+            import jieba
+        except ImportError:
+            self._bm25 = None
+            self._bm25_ids = []
+            self._jieba = None
+            return
+        _ensure_jieba_terms()
+        res = self.collection.get()
+        self._bm25_docs = res["documents"]
+        self._bm25_ids = res["ids"]
+        corpus_tokens = [list(jieba.cut(d)) for d in self._bm25_docs]
+        try:
+            self._bm25 = BM25Okapi(corpus_tokens)
+        except (ZeroDivisionError, ValueError):
+            self._bm25 = None
+        self._jieba = jieba
+        self._bm25_build_ms = (time.monotonic() - t0) * 1000
 
     def ingest(self, file_path: str) -> int:
         """读取 md/txt → split_markdown → upsert 入库；返回新增 chunk 数。"""
@@ -176,24 +216,60 @@ class RAGPipeline:
             metas.append({"source": path.as_posix(), "index": i,
                           "title": sec["title"]})
         self.collection.upsert(ids=ids, documents=docs, metadatas=metas)
+        self._build_bm25()
         return len(sections)
 
+    def _bm25_search(self, query: str, top_k: int = 3) -> list[dict]:
+        if self._bm25 is None or not self._bm25_ids:
+            return []
+        tokens = list(self._jieba.cut(query))
+        try:
+            scores = self._bm25.get_scores(tokens)
+        except (ZeroDivisionError, ValueError):
+            return []
+        ranked = sorted(range(len(scores)), key=lambda i: -scores[i])[:top_k]
+        return [{"chunk_id": self._bm25_ids[i],
+                 "content": self._bm25_docs[i]} for i in ranked if scores[i] > 0]
+
+    @staticmethod
+    def _rrf_fuse(dense: list, sparse: list, k: int = 60, top_k: int = 3) -> list[dict]:
+        """RRF 融合：Score(d) = Σ 1/(k+rank(d))。
+
+        dense 的 source/distance 字段优先保留，sparse 只补 chunk_id/content。
+        """
+        scores = {}
+        meta = {}
+        # 先放 dense（带 source/distance），再放 sparse（只补缺失字段）
+        for hits in (dense, sparse):
+            for rank, h in enumerate(hits, 1):
+                cid = h["chunk_id"]
+                scores[cid] = scores.get(cid, 0) + 1.0 / (k + rank)
+                if cid not in meta:
+                    meta[cid] = dict(h)
+                else:
+                    # dense 已有的 source/distance 不被 sparse 覆盖
+                    meta[cid].update({k: v for k, v in h.items()
+                                      if k not in meta[cid]})
+        ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
+        return [{**meta[cid], "rrf_score": s} for cid, s in ranked]
+
     def search(self, query: str, top_k: int = 3) -> list[dict]:
-        """语义检索：BGE 模型对 query 加前缀后用 query_embeddings 检索。"""
-        # 用 QUERY_INSTRUCTION 属性区分 BGE（需要 query 前缀）vs Fake/其他（走 query_texts）
+        """混合检索：BGE 稠密 + BM25 稀疏，RRF 融合重排。"""
         ef = self._ef
         if ef is not None and getattr(ef, "QUERY_INSTRUCTION", None):
             vec = ef.embed_query(query)
             res = self.collection.query(query_embeddings=[vec], n_results=top_k)
         else:
             res = self.collection.query(query_texts=[query], n_results=top_k)
-        return [
+        dense = [
             {"content": res["documents"][0][i],
              "source": res["metadatas"][0][i]["source"],
              "chunk_id": res["ids"][0][i],
              "distance": res["distances"][0][i]}
             for i in range(len(res["documents"][0]))
         ]
+        sparse = self._bm25_search(query, top_k)
+        return self._rrf_fuse(dense, sparse, top_k=top_k)
 
     def count(self) -> int:
         return self.collection.count()
