@@ -46,7 +46,7 @@ VetClaw/
 │   ├── core/config.py        # Settings + .env 加载
 │   └── services/agent_service.py  # Agent 单例装配
 ├── rules/fastpath_rules.json # P0 毒物库 + 药品白名单 + watchlist
-├── knowledge/                # 权威医疗文档（17 chunks）
+├── knowledge/                # 权威医疗文档（70 chunks）
 ├── tests/                    # 单元测试 + eval_dataset.json
 ├── scripts/
 │   ├── ingest_docs.py        # 入库脚本（默认 upsert，--rebuild 重建）
@@ -60,11 +60,18 @@ VetClaw/
 | 指标 | 数值 |
 |---|---|
 | 单元测试 | **59 全绿** |
-| Pure RAG Recall@3 | **100%** (4/4) |
-| 处方药拒答率 | **100%** (3/3) |
-| System Pass Rate | **12/12 (100%)** |
-| Fast-Path 拦截 TTFB | **3.2ms** |
-| BM25 冷启动重建 | 13ms（17 chunks） |
+| 评测集 | **50 组**（检索 21 + 急症 15 + 拒答 14） |
+| Pure RAG Recall@3 | **95.24%** (20/21) |
+| Pure RAG MRR@3 | **0.651** |
+| 急症拦截 | **15/15** |
+| 处方药拒答率 | **100%** (14/14) |
+| System Pass Rate | **49/50 (98%)** |
+| Fast-Path 拦截 TTFB | **3.2ms**（热请求） |
+| BM25 冷启动重建 | 26ms（70 chunks） |
+
+> 口径说明：Recall@3 分母为 **21**（只统计真正走 RAG 的用例）——15 组急症被 Fast-Path 前置接管、不进向量检索；System Pass Rate 分母为 **50**（端到端三段相加 20+15+14=49）。
+>
+> 剩余 1 条 MISS = **E04**（「狗体温 40.5 度算不算发烧」）。已核实为 **ANN 候选池 artifact**（`search` 把同一个 `top_k` 同时用作 dense 的 `n_results` 与 sparse 的 `top_k`，而 HNSW 近似检索的 top-3 并非 top-5 的前缀）：同一 query 在 `top_k=5` 下期望 chunk 排 **#1**。属检索深度问题、非内容缺陷，需把候选池与最终 K 解耦，本版未处理。
 
 ## 快速开始
 
