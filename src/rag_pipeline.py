@@ -1,7 +1,7 @@
 """轻量 RAG 流水线：结构感知 Markdown 切片 + ChromaDB 持久化检索。
 
 - split_text（旧，保留兼容）：递归字符切片，测试用
-- split_markdown（新）：按 ## 二级标题分块，表格整体保护
+- split_markdown（新）：按 ## 二级标题分块，表格整体保护 + 表格 chunk 上下文化
 - BGEEmbeddingFunction：本地 BGE-small-zh-v1.5，query/doc 前缀分离
 """
 import re
@@ -57,6 +57,35 @@ def _slug(title: str) -> str:
     return re.sub(r"[^\w一-鿿]+", "-", title.strip()).strip("-") or "root"
 
 
+# 表格上下文化：表格 chunk 自身不含章节标题与实体名（如「福来恩」只出现在同节正文里），
+# 直接入库会让它在稠密与稀疏检索上都"语义不可见"。这里给表格 chunk 补一段上下文头部。
+# ⚠️ 只改 content，不改切片边界与顺序 → chunk_id 保持稳定。
+TABLE_CONTEXT_MAX = 150
+
+
+def _last_paragraph(text: str) -> str:
+    """取文本最后一段非引用块正文（跳过 `>` 出处/免责声明），单行化后截断。"""
+    if not text:
+        return ""
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    for para in reversed(paras):
+        if para.startswith(">"):
+            continue
+        flat = " ".join(ln.strip() for ln in para.splitlines() if ln.strip())
+        if flat:
+            return flat[:TABLE_CONTEXT_MAX]
+    return ""
+
+
+def _table_context(title: str, lead_in: str) -> str:
+    """表格 chunk 的上下文化头部：所属章节标题（+ 紧邻其前的正文首段）。"""
+    head = [f"## {title}"]
+    para = _last_paragraph(lead_in)
+    if para:
+        head.append(para)
+    return "\n".join(head)
+
+
 def split_markdown(text: str, max_chunk: int = 800) -> list[dict]:
     """按 ## 二级标题分块；连续 | 表格行作为不可分割整体。
 
@@ -66,6 +95,11 @@ def split_markdown(text: str, max_chunk: int = 800) -> list[dict]:
     - ## 二级标题：主体切分点
     - ### 三级标题：留在所属 ## 块内
     - 无 ## 时整篇作为一个块（降级）
+    - ⚠️ 表格 chunk（连续 `|` 行）会在 content 前补一段上下文化头部：
+      `## <章节标题>` + 紧邻其前的正文首段（截断 150 字）。
+      原因是表格本身常不含实体名（如「福来恩」只在同节正文里），
+      不加头部会让表格 chunk 在稠密/稀疏检索上都"语义不可见"。
+      **只改 content，不增删 chunk、不改下标 → chunk_id 保持稳定。**
     """
     text = text.replace("\r\n", "\n").strip()
     if not text:
@@ -110,9 +144,11 @@ def _split_body(body: str, title: str, max_chunk: int) -> list[dict]:
     while i < len(lines):
         line = lines[i]
         if _is_table_line(line):
-            # 先把累积的普通段落 flush
+            # 先把累积的普通段落 flush（内容逐字节保持原样，切片边界不动）
+            # lead_in 即"紧邻表格之前的正文"，稍后用于给表格 chunk 补上下文
+            lead_in = "\n".join(buf_lines).strip()
             if buf_lines:
-                results.append({"title": title, "content": "\n".join(buf_lines).strip()})
+                results.append({"title": title, "content": lead_in})
                 buf_lines, buf_len = [], 0
             # 吞掉连续表格行（含表头分隔行）
             table = [line]
@@ -120,7 +156,9 @@ def _split_body(body: str, title: str, max_chunk: int) -> list[dict]:
             while j < len(lines) and _is_table_line(lines[j]):
                 table.append(lines[j])
                 j += 1
-            results.append({"title": title, "content": "\n".join(table).strip()})
+            table_body = "\n".join(table).strip()
+            results.append({"title": title,
+                            "content": f"{_table_context(title, lead_in)}\n\n{table_body}"})
             i = j
         else:
             buf_lines.append(line)
