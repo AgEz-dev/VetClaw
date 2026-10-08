@@ -43,10 +43,13 @@ jobs:
           restore-keys: |
             hf-${{ runner.os }}-
 
+      # ⚠️ 必须带上 graph extra：双引擎对照测试（tests/test_graph_agent.py）会真跑
+      # LangGraph 图，缺 extra 时 import 直接失败 —— 那会让 CI 假红（而非假绿）。
+      # langgraph 体积不重（16 包 / 约 6.9MB 下载），且冷启动隔离由单独测试保障。
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ".[dev]"
+          pip install ".[dev,graph]"
 
       # ---------- 硬门禁：单测 ----------
       - name: Run pytest
@@ -69,6 +72,18 @@ jobs:
           OPENAI_BASE_URL: ""
         run: |
           python -c "import json,sys; sys.path.insert(0,'src'); from services.agent_service import build_agent; a=build_agent(); g=a.guard; assert g is not None, 'FastPathGuard 未装配'; assert getattr(g,'_pipeline',None) is not None, 'guard 未注入 RAGPipeline（SOP 会为空）'; sid=json.load(open('rules/fastpath_rules.json',encoding='utf-8'))['sop_chunk_id']; assert g._fetch(sid), 'SOP chunk 点查失败: '+sid; h=g.check('猫误食了百合花怎么办'); assert h['action']=='emergency', '急症路由失效: '+str(h); print('assembly smoke OK ->', h['toxin'], h['chunk_id'])"
+
+      # ---------- 装配层冒烟（LangGraph 引擎）----------
+      # 为什么单独一步：S4.0 引入的 langgraph 分支在 CI 里**从未被执行过** ——
+      # 之前只装 ".[dev]"，选了 langgraph 也只会走到 ImportError 降级分支。
+      # 装上 extra 后这里才真正走通 build_graph_agent() 装配路径。
+      - name: Assembly smoke test (langgraph engine)
+        env:
+          VETCLAW_ENGINE: langgraph
+          OPENAI_API_KEY: sk-dummy-ci-assembly-smoke
+          OPENAI_BASE_URL: ""
+        run: |
+          python -c "import sys; sys.path.insert(0,'src'); from services.agent_service import build_agent; from graph_agent import GraphAgent; a=build_agent(); assert isinstance(a, GraphAgent), '未装配 LangGraph 引擎: '+type(a).__name__; assert callable(a.run) and callable(a.run_stream); print('assembly smoke (langgraph) OK ->', type(a).__name__)"
 
       - name: Evaluate RAG baseline
         run: |

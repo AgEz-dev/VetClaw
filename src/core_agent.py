@@ -171,28 +171,40 @@ class ReActAgent:
         return
 
     def _compliance_fix(self, cite_state, final):
-        if cite_state == "hit" and CITATION_MARK not in final:
-            return (f"【系统校验】回答缺少{CITATION_MARK}...】来源标注，"
-                    "请仅基于上述检索结果重写，并在每条事实句末标注来源。")
-        if cite_state == "miss" and "不会凭空推测用药剂量" not in final:
-            return (f"【系统校验】检索未命中，请直接回复：{DEGRADE_ANSWER}"
-                    " 不要用通用知识编造。")
-        return None
+        # 委托模块级纯函数：LangGraph 引擎（graph_agent.py）复用同一份逻辑，
+        # 保证两引擎行为零漂移（阶段四「事件序列 diff 为空」的前提）。
+        return compliance_fix(cite_state, final)
 
     def _run_tool(self, tc):
-        raw = tc.function.arguments
-        args = {} if not raw else None
-        if args is None:
-            try:
-                args = json.loads(raw)
-            except json.JSONDecodeError as e:
-                return f"参数解析失败: {e}"
-        if tc.function.name.startswith("danger_"):
-            return "工具执行失败: PermissionDenied: 该工具为高危操作，已触发安全拦截"
+        return execute_tool(self.registry, tc)
+
+
+def compliance_fix(cite_state, final):
+    """合规校验：返回补正指令（无则 None）。纯函数，不碰 writer，双引擎共用。"""
+    if cite_state == "hit" and CITATION_MARK not in final:
+        return (f"【系统校验】回答缺少{CITATION_MARK}...】来源标注，"
+                "请仅基于上述检索结果重写，并在每条事实句末标注来源。")
+    if cite_state == "miss" and "不会凭空推测用药剂量" not in final:
+        return (f"【系统校验】检索未命中，请直接回复：{DEGRADE_ANSWER}"
+                " 不要用通用知识编造。")
+    return None
+
+
+def execute_tool(registry, tc):
+    """执行一次工具调用并返回字符串结果。纯函数，双引擎共用。"""
+    raw = tc.function.arguments
+    args = {} if not raw else None
+    if args is None:
         try:
-            return str(self.registry.call(tc.function.name, args))
-        except Exception as e:
-            return f"工具执行失败: {type(e).__name__}: {e}"
+            args = json.loads(raw)
+        except json.JSONDecodeError as e:
+            return f"参数解析失败: {e}"
+    if tc.function.name.startswith("danger_"):
+        return "工具执行失败: PermissionDenied: 该工具为高危操作，已触发安全拦截"
+    try:
+        return str(registry.call(tc.function.name, args))
+    except Exception as e:
+        return f"工具执行失败: {type(e).__name__}: {e}"
 
 
 def _safe_args(raw):
