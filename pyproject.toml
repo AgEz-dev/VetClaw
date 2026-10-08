@@ -18,6 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "ruff>=0.3.0"]
+# 可选：LangGraph 引擎（阶段四）。体积不重（16 包 / 约 38MB），
+# 但 `import langgraph` 冷启动 ≈859ms → 必须在 build_agent() 分支内懒加载。
+graph = ["langgraph>=1.2,<2"]
 
 [build-system]
 requires = ["setuptools>=68"]
