@@ -2,13 +2,14 @@
 
 宠物健康分诊 Agent：用户输入宠物误食 / 症状 / 用药问题，系统通过 **Fast-Path 规则守卫 + RAG 混合检索 + 原生 ReAct 调度**，输出带引用来源的专业回答，P0 急症 3ms 级拦截。
 
-> 零 LangChain：从零手写 ReAct 状态机、tool_calls 流式解析与 cite_state 防幻觉状态机，吃透 Agent 底层原理。
+> 零 LangChain：从零手写 ReAct 状态机、tool_calls 流式解析与 cite_state 防幻觉状态机，吃透 Agent 底层原理。另有一个可选的 LangGraph 对照引擎（默认不装、不启用），见 docs/architecture.md §5。
 
 ## 核心能力
 
 - **Fast-Path 前置守卫**：P0 致命毒物（百合 / 木糖醇 / 对乙酰氨基酚 / 葱属 / 布洛芬 / 葡萄）秒级拦截，基于 ChromaDB ID 点查直取急救 SOP + 毒物详情；未收录处方药（头孢 / 阿莫西林等）剂量咨询 100% 触发分诊引导
 - **RAG 混合检索**：结构感知 Markdown 切片 + BGE-small-zh-v1.5 本地向量 + BM25(jieba 医疗词典) 稀疏召回，RRF(k=60) 融合重排
 - **原生 ReAct 调度**：`_run_events()` 统一事件生成器同时驱动同步与流式；tool_calls 流式分片重组；双层超时（SDK read timeout + Agent 总时长守卫）
+- **引擎可切换**：默认 `react`；设 `VETCLAW_ENGINE=langgraph` 可切到另一个可选引擎，两者在同一输入下事件序列一致（`tests/test_graph_agent.py` 断言）
 - **防幻觉三层防护**：Prompt 契约 → `cite_state` 局部状态机（hit 不可被 miss 覆盖）→ 补正反馈；回答强制标注【来源：chunk_id】
 - **滑动窗口记忆**：按「assistant + tool_calls 原子块」裁剪，system prompt 预算保护
 
@@ -18,6 +19,7 @@
 |---|---|---|
 | Web 框架 | FastAPI + Uvicorn | SSE 流式推送 |
 | Agent 调度 | 纯手写 ReAct（零 LangChain） | `_run_events()` 统一事件生成器 |
+| 对照引擎（可选） | LangGraph 1.2 | 默认不装不启用；`pip install -e ".[graph]"` + `VETCLAW_ENGINE=langgraph` |
 | 向量库 | ChromaDB PersistentClient | 本地 SQLite 持久化，ID 点查 <3ms |
 | Embedding | BGE-small-zh-v1.5 | 本地模型，query/doc 前缀分离 |
 | 稀疏检索 | rank_bm25 + jieba | 中文分词，医疗实体词典 |
@@ -28,7 +30,7 @@
 
 ## 架构
 
-三层架构（接入层 / 调度层 / 能力层）与关键技术决策见 [docs/architecture.md](docs/architecture.md)。
+三层架构（接入层 / 调度层 / 能力层）与关键技术决策见 [docs/architecture.md](docs/architecture.md)。调度层默认走 ReAct，也可切到可选的 LangGraph 引擎，见该文档 §5。
 
 ## 项目结构
 
@@ -37,6 +39,7 @@ VetClaw/
 ├── app.py                    # FastAPI 入口，lifespan 预热
 ├── src/
 │   ├── core_agent.py         # ReAct 调度核心（_run_events 生成器）
+│   ├── graph_agent.py        # LangGraph 对照引擎（可选，默认不启用）
 │   ├── tools.py              # inspect 反射 ToolRegistry
 │   ├── memory.py             # 滑动窗口原子块裁剪
 │   ├── rag_pipeline.py       # 切片 + BGE + BM25 + RRF 混合检索
@@ -59,7 +62,8 @@ VetClaw/
 
 | 指标 | 数值 |
 |---|---|
-| 单元测试 | **59 全绿** |
+| 单元测试 | **85 全绿** |
+| 引擎一致性（react / langgraph） | **15/15** |
 | 评测集 | **50 组**（检索 21 + 急症 15 + 拒答 14） |
 | Pure RAG Recall@3 | **95.24%** (20/21) |
 | Pure RAG MRR@3 | **0.651** |
@@ -81,6 +85,7 @@ $env:HF_ENDPOINT = "https://hf-mirror.com"
 
 # 1. 安装依赖（Python 3.11+）
 pip install -e .
+#    （可选）启用 LangGraph 对照引擎：pip install -e ".[graph]"，并设 VETCLAW_ENGINE=langgraph
 
 # 2. 配置模型 API：复制 .env.example 为 .env，填入 OPENAI_API_KEY / OPENAI_BASE_URL
 
