@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**", "chore/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 单元测试 + RAG 基线评测
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PYTHONUNBUFFERED: "1"
+      # BGE-small-zh-v1.5 从 HF 拉取。默认走 huggingface.co；
+      # 若 Runner 所在网络受限，在仓库 Settings → Variables 配置
+      # HF_ENDPOINT=https://hf-mirror.com 即可切换，无需改本文件。
+      HF_ENDPOINT: ${{ vars.HF_ENDPOINT || 'https://huggingface.co' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # BGE 权重约 95MB，缓存后单次 CI 可省 30~60s
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-bge-small-zh-v1.5
+          restore-keys: |
+            hf-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]"
+
+      # ---------- 硬门禁：单测 ----------
+      - name: Run pytest
+        run: pytest tests/ -q
+
+      # ---------- 信息性：RAG 基线 ----------
+      # 注意：data/ 被 .gitignore 忽略，CI 里没有向量库，必须先重建。
+      - name: Rebuild knowledge base
+        run: python -m scripts.ingest_docs --rebuild
+
+      # ---------- 装配层冒烟（单测覆盖不到的那一层）----------
+      # 为什么必须是独立步骤：无 key 时 build_agent() 里的 OpenAI() 会抛错，
+      # 而 app.py 的 lifespan 用 try/except 把它吞掉（只打一条 "Warm-up skipped"）
+      # → 装配层在 CI 里会"静默跳过"。给一个假 key 才能真正走完 build_agent()。
+      # ⚠️ 这个 key 不会被使用（本步骤与评测都零模型调用），它不是 secret。
+      # 覆盖的历史故障：FastPathGuard 未注入 RAGPipeline → SOP 为空（单测全绿也抓不到）
+      - name: Assembly smoke test
+        env:
+          OPENAI_API_KEY: sk-dummy-ci-assembly-smoke
+          OPENAI_BASE_URL: ""
+        run: |
+          python -c "import json,sys; sys.path.insert(0,'src'); from services.agent_service import build_agent; a=build_agent(); g=a.guard; assert g is not None, 'FastPathGuard 未装配'; assert getattr(g,'_pipeline',None) is not None, 'guard 未注入 RAGPipeline（SOP 会为空）'; sid=json.load(open('rules/fastpath_rules.json',encoding='utf-8'))['sop_chunk_id']; assert g._fetch(sid), 'SOP chunk 点查失败: '+sid; h=g.check('猫误食了百合花怎么办'); assert h['action']=='emergency', '急症路由失效: '+str(h); print('assembly smoke OK ->', h['toxin'], h['chunk_id'])"
+
+      - name: Evaluate RAG baseline
+        run: |
+          set -o pipefail
+          python -m scripts.evaluate_rag | tee eval_report.txt
+
+      # 评测为「信息性」步骤：脚本不会因 MISS 而非零退出，
+      # 指标写入 Summary 供人工核对，避免形成「为跑绿而调参」的压力。
+      - name: Publish metrics to Job Summary
+        if: always()
+        run: |
+          {
+            echo "### VetClaw RAG 基线评测"
+            echo ""
+            echo '```'
+            if [ -f eval_report.txt ]; then
+              tail -n 14 eval_report.txt
+            else
+              echo "(评测未产生输出)"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
