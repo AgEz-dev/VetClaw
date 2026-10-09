@@ -84,7 +84,8 @@ def guard_node(state, ctx):
         hit = ctx.guard.check(state["prompt"])
         if hit["action"] == "emergency":
             return {"answer": ctx.guard.emergency_message(
-                        hit["toxin"], hit["species"], hit.get("chunk_id")),
+                        hit["toxin"], hit["species"], hit.get("chunk_id"),
+                        hit.get("slots")),
                     "citations": [], "start": start, "route": "finalize"}
         if hit["action"] == "refuse":
             return {"answer": ctx.guard.refuse_message(hit["drug_hint"]),
