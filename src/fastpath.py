@@ -8,6 +8,8 @@ import json
 import re
 from pathlib import Path
 
+from triage import extract_slots, triage_note
+
 
 class FastPathGuard:
     def __init__(self, rules_path="rules/fastpath_rules.json",
@@ -31,7 +33,9 @@ class FastPathGuard:
                 if re.search(self.rules["action_regex"], query):
                     return {"action": "emergency", "toxin": toxin["name"],
                             "species": [s for s in toxin["species"] if s in query][0],
-                            "chunk_id": toxin["chunk_id"]}
+                            "chunk_id": toxin["chunk_id"],
+                            # 分诊槽位：供 emergency_message 做剂量分级（缺失项为 None）
+                            "slots": extract_slots(query)}
 
         # 规则 2：未知处方药
         if any(d in query for d in self.rules["dosage_words"]):
@@ -43,11 +47,14 @@ class FastPathGuard:
         return {"action": "pass"}
 
     def emergency_message(self, toxin: str, species: str,
-                          chunk_id: str | None = None) -> str:
+                          chunk_id: str | None = None, slots: dict | None = None) -> str:
         """从 ChromaDB 点查 SOP chunk + 毒物 chunk 拼接（<3ms，不走 embedding）。
 
         向后兼容防御：chunk_id 为 None（规则缺失或旧调用方未传）时，
         优雅降级为通用警报（仅 SOP + 免责声明），不抛异常。
+
+        分诊分级段（`triage_note`，纯计算不走检索）插在毒物详情之后、免责声明之前 ——
+        **只增不改**：预警头仍在最前、SOP 与详情原样保留、免责声明仍在最末。
         """
         sop = self._fetch(self.rules["sop_chunk_id"])
         parts = [f"【P0 急症预警】检测到{species}可能接触{toxin}。"]
@@ -57,6 +64,9 @@ class FastPathGuard:
             detail = self._fetch(chunk_id)
             if detail:
                 parts.append(f"---\n关于{toxin}的详细信息：\n{detail}")
+        note = triage_note(toxin, slots)
+        if note:
+            parts.append(note)
         parts.append("\n⚠️ 以上建议仅供参考，不能替代执业兽医诊断，紧急情况请立即就医。")
         return "\n\n".join(parts)
 

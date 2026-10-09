@@ -72,7 +72,8 @@ class ReActAgent:
             hit = self.guard.check(prompt)
             if hit["action"] == "emergency":
                 msg = self.guard.emergency_message(
-                    hit["toxin"], hit["species"], hit.get("chunk_id"))
+                    hit["toxin"], hit["species"], hit.get("chunk_id"),
+                    hit.get("slots"))
                 yield {"event": "done", "data": {"answer": msg, "citations": []}}
                 return
             if hit["action"] == "refuse":

@@ -1,0 +1,24 @@
+{
+  "_notes": {
+    "purpose": "机器可读的毒物剂量分级表，供 src/triage.py 使用。人读版本见 knowledge/toxic_substances_handbook.md，本文不改写其结论，只做结构化镜像。",
+    "thresholds": "犬，按可可碱（theobromine）计，mg/kg。引自 knowledge/toxic_substances_handbook.md「巧克力与可可碱中毒」：20 mg/kg 起出现轻度胃肠症状；40-50 mg/kg 出现心动过速与兴奋；60 mg/kg 以上可能抽搐。",
+    "mg_per_g": "引自同一手册的「巧克力类型 / 可可碱含量」表，取给定区间的中值：白 0.03（单点值）；牛奶 2-3 → 2.5；黑（半甜）5-8 → 6.5；烘焙黑 10-16 → 13；可可粉 20-26 → 23。",
+    "portions_g": "常见零售规格近似值，非毒理数据、手册未收录。仅在用户未给出克数时作兜底换算，据此得出的结论必须在输出中标注为估算并打印所用克数假设。"
+  },
+  "chocolate": {
+    "basis": "theobromine",
+    "thresholds": [
+      {"mg_per_kg": 60, "tier": "severe", "label": "重度",
+       "advice": "可能抽搐、心律失常，属危重情况，须立即急诊。"},
+      {"mg_per_kg": 40, "tier": "moderate", "label": "中度",
+       "advice": "可出现心动过速、兴奋、多饮多尿，需立即就医。"},
+      {"mg_per_kg": 20, "tier": "mild", "label": "轻度",
+       "advice": "可能出现呕吐、腹泻等胃肠症状，应尽快联系兽医评估。"}
+    ],
+    "below_label": "未达轻度阈值",
+    "below_advice": "低于手册所述轻度症状阈值（20 mg/kg）。但白巧克力与牛奶巧克力高脂仍可诱发胰腺炎，且个体差异大，仍建议联系兽医评估。",
+    "mg_per_g": {"白": 0.03, "牛奶": 2.5, "黑": 6.5, "烘焙黑": 13, "可可粉": 23},
+    "portions_g": {"板": 100, "条": 40, "块": 6, "颗": 5, "粒": 5, "片": 6},
+    "type_hint": "白 / 牛奶 / 黑 / 烘焙黑 / 可可粉"
+  }
+}

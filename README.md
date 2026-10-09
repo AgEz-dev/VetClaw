@@ -7,6 +7,7 @@
 ## 核心能力
 
 - **Fast-Path 前置守卫**：P0 致命毒物（百合 / 木糖醇 / 对乙酰氨基酚 / 葱属 / 布洛芬 / 葡萄）秒级拦截，基于 ChromaDB ID 点查直取急救 SOP + 毒物详情；未收录处方药（头孢 / 阿莫西林等）剂量咨询 100% 触发分诊引导
+- **分诊剂量分级**：急症响应按毒理阈值分级 —— 从查询中抽取体重 / 巧克力类型 / 摄入量等槽位，按可可碱 mg/kg（20/40/60 阈值）输出严重程度档位；信息不足时明确列出还需补充哪几项（巧克力毒为剂量依赖，2 kg 吉娃娃与 35 kg 拉布拉多的同一误食，暴露量可差三个数量级）
 - **RAG 混合检索**：结构感知 Markdown 切片 + BGE-small-zh-v1.5 本地向量 + BM25(jieba 医疗词典) 稀疏召回，RRF(k=60) 融合重排
 - **原生 ReAct 调度**：`_run_events()` 统一事件生成器同时驱动同步与流式；tool_calls 流式分片重组；双层超时（SDK read timeout + Agent 总时长守卫）
 - **引擎可切换**：默认 `react`；设 `VETCLAW_ENGINE=langgraph` 可切到另一个可选引擎，两者在同一输入下事件序列一致（`tests/test_graph_agent.py` 断言）
@@ -24,7 +25,7 @@
 | Embedding | BGE-small-zh-v1.5 | 本地模型，query/doc 前缀分离 |
 | 稀疏检索 | rank_bm25 + jieba | 中文分词，医疗实体词典 |
 | 融合 | RRF（k=60） | Dense + Sparse 双路融合 |
-| 规则守卫 | FastPathGuard | P0 急症拦截 + 未知处方药拒答 |
+| 规则守卫 | FastPathGuard | P0 急症拦截 + 未知处方药拒答 + 剂量分级 |
 | 记忆 | SlidingWindowMemory | 原子块裁剪，system prompt 保护 |
 | 部署 | Docker Compose | 数据卷挂载 `./data` |
 
@@ -44,11 +45,13 @@ VetClaw/
 │   ├── memory.py             # 滑动窗口原子块裁剪
 │   ├── rag_pipeline.py       # 切片 + BGE + BM25 + RRF 混合检索
 │   ├── fastpath.py           # Fast-Path 规则守卫
+│   ├── triage.py             # 分诊槽位抽取 + 毒物剂量分级（纯函数）
 │   ├── knowledge_tool.py     # RAG 工具适配层（依赖注入）
 │   ├── api.py                # POST /api/chat/stream SSE 路由
 │   ├── core/config.py        # Settings + .env 加载
 │   └── services/agent_service.py  # Agent 单例装配
 ├── rules/fastpath_rules.json # P0 毒物库 + 药品白名单 + watchlist
+├── rules/toxin_dose_table.json # 毒物剂量分级表（巧克力可可碱 mg/kg 阈值，机器可读镜像）
 ├── knowledge/                # 权威医疗文档（70 chunks）
 ├── tests/                    # 单元测试 + eval_dataset.json
 ├── scripts/
@@ -62,7 +65,7 @@ VetClaw/
 
 | 指标 | 数值 |
 |---|---|
-| 单元测试 | **85 全绿** |
+| 单元测试 | **104 全绿** |
 | 引擎一致性（react / langgraph） | **15/15** |
 | 评测集 | **50 组**（检索 21 + 急症 15 + 拒答 14） |
 | Pure RAG Recall@3 | **95.24%** (20/21) |
