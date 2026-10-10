@@ -28,6 +28,7 @@ from core_agent import (
     _safe_args,
     compliance_fix,
     execute_tool,
+    render_patient_context,
 )
 from resilience import call_llm
 
@@ -38,6 +39,7 @@ class AgentState(TypedDict, total=False):
     """图状态：字段与 `ReActAgent._run_events` 的局部变量一一对应（计划 §3.1）。"""
     prompt: str
     history: list
+    patient_context: dict | None   # 档案上下文（仅追加到 system 提示，不参与判定）
     messages: list            # 累积对话消息
     cite_state: str | None    # None | "hit" | "miss"
     step: int                 # 已执行的 llm 轮数
@@ -82,7 +84,7 @@ def guard_node(state, ctx):
     """Fast-Path 前置拦截（不调 LLM）：emergency / refuse 直接给答案并跳 finalize。"""
     start = ctx.clock()
     if ctx.guard is not None:
-        hit = ctx.guard.check(state["prompt"])
+        hit = ctx.guard.check(state["prompt"], state.get("patient_context"))
         if hit["action"] == "emergency":
             return {"answer": ctx.guard.emergency_message(
                         hit["toxin"], hit["species"], hit.get("chunk_id"),
@@ -92,7 +94,12 @@ def guard_node(state, ctx):
             return {"answer": ctx.guard.refuse_message(hit["drug_hint"]),
                     "citations": [], "start": start, "route": "finalize"}
 
-    messages = [{"role": "system", "content": ctx.system_prompt}]
+    # 档案上下文：与 ReActAgent 共用同一渲染函数，保证注入文本零漂移
+    system_content = ctx.system_prompt
+    ctx_text = render_patient_context(state.get("patient_context"))
+    if ctx_text:
+        system_content = f"{system_content}\n\n{ctx_text}"
+    messages = [{"role": "system", "content": system_content}]
     if state.get("history"):
         messages.extend(state["history"])
     messages.append({"role": "user", "content": state["prompt"]})
@@ -277,17 +284,18 @@ class GraphAgent:
     def __init__(self, graph):
         self._graph = graph
 
-    def run(self, prompt, history=None):
+    def run(self, prompt, history=None, patient_context=None):
         # 与 ReActAgent.run 语义一致：done 取 answer、error 取 message。
-        for ev in self.run_stream(prompt, history):
+        for ev in self.run_stream(prompt, history, patient_context):
             if ev["event"] == "done":
                 return ev["data"]["answer"]
             if ev["event"] == "error":
                 return ev["data"]["message"]
         return ""
 
-    def run_stream(self, prompt, history=None):
-        init = {"prompt": prompt, "history": list(history) if history else []}
+    def run_stream(self, prompt, history=None, patient_context=None):
+        init = {"prompt": prompt, "history": list(history) if history else [],
+                "patient_context": patient_context}
         try:
             yield from self._graph.stream(init, stream_mode="custom")
         except Exception:

@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from triage import extract_slots, triage_note
+from triage import extract_slots, merge_patient_context, triage_note
 
 
 class FastPathGuard:
@@ -20,7 +20,7 @@ class FastPathGuard:
             self.rules = json.loads(Path(rules_path).read_text(encoding="utf-8"))
         self._pipeline = pipeline
 
-    def check(self, query: str) -> dict:
+    def check(self, query: str, patient_context: dict | None = None) -> dict:
         q = query.lower()
 
         # 规则 1：P0 急症
@@ -34,8 +34,9 @@ class FastPathGuard:
                     return {"action": "emergency", "toxin": toxin["name"],
                             "species": [s for s in toxin["species"] if s in query][0],
                             "chunk_id": toxin["chunk_id"],
-                            # 分诊槽位：供 emergency_message 做剂量分级（缺失项为 None）
-                            "slots": extract_slots(query)}
+                            # 分诊槽位：供 emergency_message 做剂量分级（缺失项为 None）；
+                            # 档案可补体重等缺项，提问里显式给出的值优先
+                            "slots": merge_patient_context(extract_slots(query), patient_context)}
 
         # 规则 2：未知处方药
         if any(d in query for d in self.rules["dosage_words"]):

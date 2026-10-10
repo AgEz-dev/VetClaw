@@ -31,7 +31,7 @@ def chat_stream(req: ChatRequest):
         # 架构边界：StreamingResponse 握手后 HTTP 状态码已发 200，全局异常处理器
         # 再也捕获不到生成器内部异常。因此这里必须自己兜住，把异常转成 error 事件再关流。
         try:
-            for ev in agent.run_stream(req.prompt, req.history):
+            for ev in agent.run_stream(req.prompt, req.history, req.patient_context):
                 yield to_sse(ev["event"], ev["data"])
         except Exception:
             logger.exception("chat stream generator error")

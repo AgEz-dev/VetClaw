@@ -13,7 +13,9 @@ import logging
 import uuid
 from contextvars import ContextVar
 
-REQUEST_ID_HEADER = "X-Request-Id"
+# 链路头：与调用方（业务系统）统一为 X-Trace-Id；同时兼容历史的 X-Request-Id。
+TRACE_ID_HEADER = "X-Trace-Id"
+LEGACY_TRACE_ID_HEADER = "X-Request-Id"
 
 _request_id: ContextVar[str] = ContextVar("request_id", default="")
 
@@ -31,7 +33,8 @@ def new_request_id() -> str:
 
 
 class RequestIdMiddleware:
-    """纯 ASGI 中间件：读上游 X-Request-Id（缺失则生成），写入 contextvar 并回写响应头。"""
+    """纯 ASGI 中间件：读上游 `X-Trace-Id`（兼容 `X-Request-Id`，缺失则生成），
+    写入 contextvar 并回写 `X-Trace-Id` 响应头。"""
 
     def __init__(self, app):
         self.app = app
@@ -41,14 +44,15 @@ class RequestIdMiddleware:
             await self.app(scope, receive, send)
             return
 
-        raw = dict(scope.get("headers") or []).get(b"x-request-id")
+        inbound = dict(scope.get("headers") or [])
+        raw = inbound.get(b"x-trace-id") or inbound.get(b"x-request-id")
         rid = raw.decode("latin-1") if raw else new_request_id()
         set_request_id(rid)
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 headers = message.setdefault("headers", [])
-                headers.append((b"x-request-id", rid.encode("latin-1")))
+                headers.append((b"x-trace-id", rid.encode("latin-1")))
             await send(message)
 
         await self.app(scope, receive, send_wrapper)

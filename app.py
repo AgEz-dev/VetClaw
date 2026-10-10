@@ -47,7 +47,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# request_id 中间件（纯 ASGI）：最后注册 → 位于最外层，SSE 响应也会回写 X-Request-Id
+# request_id 中间件（纯 ASGI）：最后注册 → 位于最外层，SSE 响应也会回写 X-Trace-Id
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(router)
