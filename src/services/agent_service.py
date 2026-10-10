@@ -34,10 +34,12 @@ def build_agent():
         return build_graph_agent(
             OpenAI(**kwargs), registry, pipeline, guard,
             model=settings.model, total_timeout=settings.total_timeout,
+            max_steps=settings.max_steps,
         )
 
     return ReActAgent(OpenAI(**kwargs), registry, model=settings.model,
                       total_timeout=settings.total_timeout,
+                      max_steps=settings.max_steps,
                       fastpath_guard=guard)
 
 

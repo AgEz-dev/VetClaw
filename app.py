@@ -14,8 +14,10 @@ from fastapi.responses import JSONResponse  # noqa: E402
 
 from api import router  # noqa: E402
 from core.config import settings  # noqa: E402
+from observability import RequestIdMiddleware, install_logging  # noqa: E402
 
-logging.basicConfig(level=logging.INFO)
+# 结构化日志 + request_id 注入（维度 6），取代裸 logging.basicConfig
+install_logging()
 
 
 @asynccontextmanager
@@ -44,6 +46,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# request_id 中间件（纯 ASGI）：最后注册 → 位于最外层，SSE 响应也会回写 X-Request-Id
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(router)
 
