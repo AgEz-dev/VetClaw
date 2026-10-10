@@ -12,6 +12,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - VETCLAW_TIMEOUT=${VETCLAW_TIMEOUT:-15}
       - VETCLAW_TOTAL_TIMEOUT=${VETCLAW_TOTAL_TIMEOUT:-30}
+      - VETCLAW_MAX_STEPS=${VETCLAW_MAX_STEPS:-5}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
     env_file:
       - .env
