@@ -29,6 +29,7 @@ from core_agent import (
     compliance_fix,
     execute_tool,
 )
+from resilience import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -112,8 +113,9 @@ def llm_node(state, ctx):
     tool_parts, text_parts = {}, []
     stream = None
     try:
-        stream = ctx.client.chat.completions.create(
-            model=ctx.model, messages=state["messages"],
+        # 韧性：与手写引擎共用同一实现（退避重试 + 熔断），保证双引擎零漂移
+        stream = call_llm(
+            ctx.client, model=ctx.model, messages=state["messages"],
             tools=ctx.registry.schemas(), stream=True)
         for chunk in stream:
             if ctx.clock() - start > ctx.total_timeout:

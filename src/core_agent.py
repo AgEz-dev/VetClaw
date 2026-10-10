@@ -5,6 +5,8 @@ import re
 import time
 from types import SimpleNamespace
 
+from resilience import call_llm
+
 logger = logging.getLogger(__name__)
 
 CITATION_MARK = "【来源："
@@ -95,8 +97,9 @@ class ReActAgent:
             tool_parts, text_parts = {}, []
             stream = None
             try:
-                stream = self.client.chat.completions.create(
-                    model=self.model, messages=messages,
+                # 韧性：退避重试 + 熔断（与 graph 引擎共用同一实现，保证零漂移）
+                stream = call_llm(
+                    self.client, model=self.model, messages=messages,
                     tools=self.registry.schemas(), stream=True)
                 for chunk in stream:
                     if self._clock() - start > self.total_timeout:
