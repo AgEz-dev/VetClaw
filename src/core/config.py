@@ -12,6 +12,8 @@ class Settings:
         self.timeout = float(os.getenv("VETCLAW_TIMEOUT", "15"))
         # Agent 层总时长守卫：整个 ReAct 生命周期（含多轮调用+工具执行）上限
         self.total_timeout = float(os.getenv("VETCLAW_TOTAL_TIMEOUT", "30"))
+        # ReAct 最大步数（工具循环与补正循环共用同一份预算）。默认 5，沿用历史行为。
+        self.max_steps = int(os.getenv("VETCLAW_MAX_STEPS", "5"))
         # 引擎开关：react（默认，零新增依赖）| langgraph（可选依赖，见 pyproject 的 [graph] extra）
         # 非法值 fail-fast —— 不静默回落 react，否则 CI 会"假绿"（评测跑的其实是另一套引擎）。
         self.engine = os.getenv("VETCLAW_ENGINE", "react").strip().lower()

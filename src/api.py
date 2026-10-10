@@ -5,6 +5,7 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
+from observability import get_request_id, set_request_id
 from schemas.chat import ChatRequest
 from services.agent_service import get_agent
 
@@ -21,8 +22,12 @@ def to_sse(event, data):
 @router.post("/chat/stream")
 def chat_stream(req: ChatRequest):
     agent = get_agent()
+    # 在请求线程捕获 request_id（context 由 RequestIdMiddleware 注入），供生成器内日志
+    # 与兜底 error 事件使用——生成器执行上下文与请求上下文不保证一致，故显式透传。
+    rid = get_request_id()
 
     def generate():
+        set_request_id(rid)
         # 架构边界：StreamingResponse 握手后 HTTP 状态码已发 200，全局异常处理器
         # 再也捕获不到生成器内部异常。因此这里必须自己兜住，把异常转成 error 事件再关流。
         try:
@@ -31,7 +36,8 @@ def chat_stream(req: ChatRequest):
         except Exception:
             logger.exception("chat stream generator error")
             yield to_sse("error", {"code": "INTERNAL_ERROR",
-                                    "message": "服务内部错误，请稍后重试"})
+                                    "message": "服务内部错误，请稍后重试",
+                                    "trace_id": rid})
 
     return StreamingResponse(
         generate(),

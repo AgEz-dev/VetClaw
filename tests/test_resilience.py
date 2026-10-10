@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
@@ -14,6 +16,7 @@ from app import app  # noqa: E402
 from core_agent import ReActAgent  # noqa: E402
 from tools import ToolRegistry  # noqa: E402
 from api import to_sse  # noqa: E402
+from resilience import CircuitOpenError, breaker, call_llm  # noqa: E402
 
 
 class FakeStream:
@@ -141,6 +144,70 @@ def test_custom_clock_not_timeout_passes():
     event_types = [e["event"] for e in events]
     assert "error" not in event_types
     assert event_types[-1] == "done"
+
+
+# ── B3：LLM 调用韧性（退避重试 + 熔断）────────────────────────────────
+
+
+class FakeTimeoutError(Exception):
+    """类名含 'timeout' → is_transient 判定为瞬时错误。"""
+
+
+class FakeBadRequestError(Exception):
+    """非瞬时错误：不应触发重试。"""
+
+
+class _FlakyCompletions:
+    def __init__(self, failures, exc_type=FakeTimeoutError):
+        self.failures = failures
+        self.exc_type = exc_type
+        self.calls = 0
+
+    def create(self, **kwargs):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise self.exc_type("flaky")
+        return "OK_STREAM"
+
+
+class _FlakyClient:
+    def __init__(self, failures, exc_type=FakeTimeoutError):
+        self.chat = SimpleNamespace(completions=_FlakyCompletions(failures, exc_type))
+
+
+@pytest.fixture(autouse=True)
+def _reset_breaker():
+    """熔断器是进程级单例，用例前后都重置，避免跨用例污染。"""
+    breaker.reset()
+    yield
+    breaker.reset()
+
+
+def test_llm_retry_then_success():
+    """瞬时错误重试后成功：调用次数 = 失败数 + 1，且不误开熔断。"""
+    client = _FlakyClient(failures=2)
+    assert call_llm(client, model="m", messages=[], stream=True) == "OK_STREAM"
+    assert client.chat.completions.calls == 3
+
+
+def test_llm_non_transient_not_retried():
+    """非瞬时错误不重试：仅调用 1 次并原样抛出。"""
+    client = _FlakyClient(failures=1, exc_type=FakeBadRequestError)
+    with pytest.raises(FakeBadRequestError):
+        call_llm(client, model="m", messages=[], stream=True)
+    assert client.chat.completions.calls == 1
+
+
+def test_llm_circuit_opens_and_fast_fails():
+    """连续失败达阈值 → 熔断打开 → 后续调用快速失败且零真实请求。"""
+    client = _FlakyClient(failures=10_000)
+    for _ in range(breaker.threshold):
+        with pytest.raises(Exception):
+            call_llm(client, model="m", messages=[], stream=True)
+    calls_before = client.chat.completions.calls
+    with pytest.raises(CircuitOpenError):
+        call_llm(client, model="m", messages=[], stream=True)
+    assert client.chat.completions.calls == calls_before
 
 
 if __name__ == "__main__":

@@ -217,7 +217,13 @@ class RAGPipeline:
         self._build_bm25()
 
     def _build_bm25(self):
-        """从 ChromaDB 加载全量文档，构建 BM25 稀疏索引。"""
+        """从 ChromaDB 加载全量文档，构建 BM25 稀疏索引。
+
+        ⚠️ 规模化隐患（技术债，已记账，当前不改）：`collection.get()` 一次性把**全量**
+        chunk 与其分词结果读入内存，占用随语料线性增长——当前 70 chunks 无感，
+        十万级规模会显著吃内存/拖慢启动。演进方向：分片/懒加载构建，或改用磁盘倒排
+        （ES / tantivy 等），亦可只加载 topN 候选后再建索引。
+        """
         t0 = time.monotonic()
         try:
             from rank_bm25 import BM25Okapi
