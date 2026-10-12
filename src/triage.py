@@ -153,6 +153,31 @@ def extract_slots(text, table=None):
     }
 
 
+def merge_patient_context(slots: dict, patient_context) -> dict:
+    """把宠物档案并入分诊槽位；**提问里显式给出的值优先，档案只补缺**。
+
+    目前档案能提供的是体重（weight_kg）—— 剂量分级（mg/kg）最依赖它。
+    物种等仅用于守卫判定，不在这里展开。纯函数、双引擎共用，保证注入一致。
+    """
+    if not patient_context:
+        return slots or {}
+    merged = dict(slots or {})
+
+    def _get(key):
+        if isinstance(patient_context, dict):
+            return patient_context.get(key)
+        return getattr(patient_context, key, None)
+
+    if not merged.get("weight_kg"):
+        weight = _get("weight_kg")
+        if weight is not None:
+            try:
+                merged["weight_kg"] = float(weight)
+            except (TypeError, ValueError):
+                pass   # 档案值异常时按缺失处理，不阻塞分级
+    return merged
+
+
 def assess_chocolate(weight_kg, choc_type, amount_g, table=None):
     """按可可碱 mg/kg 分级。返回档位、依据文案与计算明细（详情用于输出可追溯）。"""
     spec = (table or load_dose_table())["chocolate"]

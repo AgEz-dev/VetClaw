@@ -40,6 +40,45 @@ DEFAULT_SYSTEM_PROMPT = """你是 VetClaw，一个宠物健康分诊助手。你
 """
 
 
+PATIENT_CONTEXT_HEADER = "宠物档案上下文（仅作背景参考，不要主动复述全部内容）："
+
+
+def render_patient_context(patient_context) -> str:
+    """把档案字段渲染为单段文本；无有效字段时返回 ''。
+
+    纯函数、**双引擎共用**（`core_agent` / `graph_agent`），保证注入文本零漂移。
+    接受 dict 或含同名属性的对象（如 Pydantic 模型）。
+    注意：本函数**不参与任何判定**，只在系统提示里追加背景信息——
+    Fast-Path 急症拦截仍只看用户提问本身，不受档案影响。
+    """
+    if not patient_context:
+        return ""
+
+    def _get(key):
+        if isinstance(patient_context, dict):
+            return patient_context.get(key)
+        return getattr(patient_context, key, None)
+
+    parts = []
+    if _get("species"):
+        seg = f"物种: {_get('species')}"
+        if _get("breed"):
+            seg += f"; 品种: {_get('breed')}"
+        parts.append(seg)
+    if _get("age_years") is not None:
+        parts.append(f"年龄: {_get('age_years')}岁")
+    if _get("weight_kg") is not None:
+        parts.append(f"体重: {_get('weight_kg')}kg")
+    if _get("allergies"):
+        parts.append(f"过敏史: {_get('allergies')}")
+    if _get("latest_diagnosis"):
+        parts.append(f"最近一次诊断: {_get('latest_diagnosis')}")
+    if _get("vaccine_alert_count") is not None:
+        parts.append(f"疫苗逾期/将到期提醒数: {_get('vaccine_alert_count')}")
+
+    return f"{PATIENT_CONTEXT_HEADER}\n- " + "；".join(parts) if parts else ""
+
+
 class ReActAgent:
     def __init__(self, client, registry, model="gpt-4o-mini",
                  max_steps=5, system_prompt=DEFAULT_SYSTEM_PROMPT,
@@ -53,25 +92,25 @@ class ReActAgent:
         self.total_timeout = total_timeout
         self.guard = fastpath_guard
 
-    def run(self, prompt, history=None):
+    def run(self, prompt, history=None, patient_context=None):
         # 消费统一事件流：done 取 answer、error 取 message，与流式行为 100% 一致。
-        for ev in self._run_events(prompt, history):
+        for ev in self._run_events(prompt, history, patient_context):
             if ev["event"] == "done":
                 return ev["data"]["answer"]
             if ev["event"] == "error":
                 return ev["data"]["message"]
         return ""
 
-    def run_stream(self, prompt, history=None):
-        yield from self._run_events(prompt, history)
+    def run_stream(self, prompt, history=None, patient_context=None):
+        yield from self._run_events(prompt, history, patient_context)
 
-    def _run_events(self, prompt, history=None):
+    def _run_events(self, prompt, history=None, patient_context=None):
         cite_state = None
         start = self._clock()
 
         # Fast-Path 规则守卫：P0 急症与未知处方药在入口秒级拦截，不调 LLM
         if self.guard is not None:
-            hit = self.guard.check(prompt)
+            hit = self.guard.check(prompt, patient_context)
             if hit["action"] == "emergency":
                 msg = self.guard.emergency_message(
                     hit["toxin"], hit["species"], hit.get("chunk_id"),
@@ -83,7 +122,12 @@ class ReActAgent:
                 yield {"event": "done", "data": {"answer": msg, "citations": []}}
                 return
 
-        messages = [{"role": "system", "content": self.system_prompt}]
+        # 档案上下文：仅追加到 system 提示，不参与任何判定（急症拦截仍只看 prompt）
+        system_content = self.system_prompt
+        ctx_text = render_patient_context(patient_context)
+        if ctx_text:
+            system_content = f"{system_content}\n\n{ctx_text}"
+        messages = [{"role": "system", "content": system_content}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": prompt})

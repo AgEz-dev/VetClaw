@@ -38,8 +38,8 @@ docker compose logs -f vetclaw
 ## 4. 健康检查与观测
 
 - **健康检查**：`GET /health` → `{"status":"ok"}`
-- **请求 ID**：响应头回写 `X-Request-Id`（透传或生成），日志为单行 JSON 且每条含 `request_id`，
-  便于按 request 粒度检索与跨服务对齐。
+- **链路 ID**：请求头 `X-Trace-Id`（透传或生成，兼容历史的 `X-Request-Id`），响应头回写 `X-Trace-Id`；
+  日志为单行 JSON 且每条含 `request_id`，便于按 request 粒度检索与跨服务对齐。
 - **事件流**：`POST /api/chat/stream` 为标准 SSE，事件类型 `thought` / `tool_call` / `tool_result`
   / `token` / `done` / `error`；`error` 事件携带 `trace_id`。
 
