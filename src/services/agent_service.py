@@ -4,9 +4,11 @@ import knowledge_tool  # noqa: F401  导入即注册 search_knowledge_base
 from core_agent import ReActAgent
 
 _agent = None
+_guard = None
 
 
 def build_agent():
+    global _guard
     from openai import OpenAI
     from core.config import settings
     from fastpath import FastPathGuard
@@ -20,6 +22,7 @@ def build_agent():
     pipeline = RAGPipeline(embedding_function=BGEEmbeddingFunction())
     rag_provider.set(pipeline)
     guard = FastPathGuard(pipeline=pipeline)
+    _guard = guard          # 供预问诊复用（get_guard），避免重复加载 BGE 与 Chroma
 
     # ⚠️ langgraph 只允许在**本分支内** import：实测 `import langgraph` 冷启动 ≈859ms，
     # 顶层 import 会直接毁掉 P0「3.2ms / 冷启动」口径（见 HANDOVER §九）。
@@ -53,3 +56,19 @@ def get_agent():
 def set_agent(agent):
     global _agent
     _agent = agent
+
+
+def get_guard():
+    """预问诊复用的守卫（与 chat 链路**同一个实例**）。
+
+    复用而非新建的理由：``build_agent()`` 会加载 BGE 模型与 Chroma，
+    再来一份内存翻倍 —— 必须共用。
+    """
+    get_agent()
+    return _guard
+
+
+def set_guard(guard):
+    """测试注入。"""
+    global _guard
+    _guard = guard

@@ -44,3 +44,50 @@ def chat_stream(req: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/intake/stream")
+def intake_stream(req: ChatRequest):
+    """预问诊：**一次请求 = 一轮对话**。
+
+    本服务**无状态** —— 会话状态由调用方（业务系统）保存并在下次请求经
+    ``intake_state`` 原样带回，因此不需要 session id、不需要 TTL、不强依赖内存缓存。
+
+    终态事件为 ``done``，其 ``data.intake`` 携带本轮追问或最终结构化摘要
+    （契约 v1.2 §3.4）；``data.intake.state`` 是**下一次请求要原样带回**的续传状态。
+    """
+    from intake_flow import IntakeSession
+
+    from services.intake_service import build_archive, get_guard, get_llm
+
+    rid = get_request_id()
+
+    def generate():
+        set_request_id(rid)
+        try:
+            session = IntakeSession.from_state(
+                req.intake_state,
+                llm=get_llm(),
+                archive=build_archive(req.intake_archive),
+                guard=get_guard(),
+                patient_context=(req.patient_context.model_dump()
+                                 if req.patient_context else None),
+            )
+            result = session.opening() if not req.intake_state else session.handle(req.prompt)
+
+            if result.get("message"):                       # 开场白
+                yield to_sse("token", {"text": result["message"]})
+            for q in result.get("questions", []):           # 本轮追问
+                yield to_sse("token", {"text": "\n\n" + q["ask"]})
+            yield to_sse("done", {"answer": "", "citations": [], "intake": result})
+        except Exception:
+            logger.exception("intake stream generator error")
+            yield to_sse("error", {"code": "INTERNAL_ERROR",
+                                   "message": "服务内部错误，请稍后重试",
+                                   "trace_id": rid})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
