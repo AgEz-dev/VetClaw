@@ -2,6 +2,7 @@
 import re
 import shutil
 import sys
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -22,12 +23,16 @@ class FakeEmbedding(EmbeddingFunction):
         return [self._embed(t) for t in input]
 
     def _embed(self, text):
+        # ⚠️ 不可使用内置 hash()：Python 3.3+ 对 str/bytes 的 hash 每进程随机加盐
+        # （PYTHONHASHSEED），会让本 fixture 的向量每次运行都不同 —— 依赖排序结果的
+        # 断言（如 test_bm25_recovery_after_restart）随之随机失败，且与代码改动无关。
+        # 改用 zlib.crc32：跨进程、跨 Python 版本稳定。
         vec = [0.0] * DIM
         for ch in text:
             if "一" <= ch <= "鿿":
-                vec[hash(ch) % DIM] += 1.0
+                vec[zlib.crc32(ch.encode("utf-8")) % DIM] += 1.0
         for token in re.findall(r"[a-z]+", text.lower()):
-            vec[hash(token) % DIM] += 1.0
+            vec[zlib.crc32(token.encode("utf-8")) % DIM] += 1.0
         return vec
 
 
