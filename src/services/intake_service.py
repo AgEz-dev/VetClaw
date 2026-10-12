@@ -31,7 +31,8 @@ def build_llm() -> Callable[[list[dict]], str]:
 
     def call(messages: list[dict]) -> str:
         resp = client.chat.completions.create(model=settings.model, messages=messages,
-                                              temperature=0)
+                                              temperature=0,
+                                              max_tokens=settings.max_tokens)
         return resp.choices[0].message.content or ""
 
     return call

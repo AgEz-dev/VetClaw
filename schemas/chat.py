@@ -44,6 +44,22 @@ class ChatRequest(BaseModel):
     与 ``patient_context`` 的分工：后者进 LLM 提示，本字段进**槽位预填**。"""
 
 
+class RecordDraftRequest(BaseModel):
+    """病历起草请求（问诊辅助 · 第二批）。
+
+    全部由业务系统（Java）汇集后传入：预问诊摘要 + 对话原文 + 档案槽位 + 宠物信号。
+    本服务保持无状态、不反查业务库 —— 与预问诊同一单向依赖原则。
+    """
+
+    summary: dict = Field(default_factory=dict)
+    """预问诊结构化摘要（契约 v1.2 §3.4 的 ``intake``）。"""
+    dialogue: list[dict] = Field(default_factory=list)
+    """对话原文 ``[{"role", "text"}]``。"""
+    archive: dict | None = None
+    """档案槽位（``vaccine`` / ``past_disease`` / ``medications`` / ``allergy``）。"""
+    patient_context: PatientContext | None = None
+
+
 class ChatResponse(BaseModel):
     answer: str
     citations: list[str] = Field(default_factory=list)

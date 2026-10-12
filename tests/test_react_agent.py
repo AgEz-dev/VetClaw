@@ -179,3 +179,18 @@ if __name__ == "__main__":
     test_parallel_tool_calls()
     test_dangerous_tool_interception()
     print("全部断言通过")
+
+
+def test_max_tokens_passed_to_llm_call():
+    """🔴 台账 §1.1-L3：输出上界必须在每次模型调用里生效（防 token 滥用）。"""
+    client = FakeClient([text_msg("你好")])
+    agent = ReActAgent(client, ToolRegistry(), model="fake", max_tokens=123)
+    list(agent.run_stream("你好"))
+    assert len(client.calls) == 1
+    assert client.calls[0]["max_tokens"] == 123
+
+    # 未配置（None）→ 不传该参数（兼容既有测试替身与旧行为）
+    client2 = FakeClient([text_msg("你好")])
+    agent2 = ReActAgent(client2, ToolRegistry(), model="fake")
+    list(agent2.run_stream("你好"))
+    assert "max_tokens" not in client2.calls[0]

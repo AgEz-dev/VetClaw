@@ -14,6 +14,9 @@ class Settings:
         self.total_timeout = float(os.getenv("VETCLAW_TOTAL_TIMEOUT", "30"))
         # ReAct 最大步数（工具循环与补正循环共用同一份预算）。默认 5，沿用历史行为。
         self.max_steps = int(os.getenv("VETCLAW_MAX_STEPS", "5"))
+        # 输出长度上界：单次补全的 max_tokens（防 token 滥用的最后闸门，台账 §1.1-L3）。
+        # 覆盖 chat / intake / draft 三条链路的所有模型调用。
+        self.max_tokens = int(os.getenv("VETCLAW_MAX_TOKENS", "800"))
         # 引擎开关：react（默认，零新增依赖）| langgraph（可选依赖，见 pyproject 的 [graph] extra）
         # 非法值 fail-fast —— 不静默回落 react，否则 CI 会"假绿"（评测跑的其实是另一套引擎）。
         self.engine = os.getenv("VETCLAW_ENGINE", "react").strip().lower()

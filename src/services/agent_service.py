@@ -37,13 +37,13 @@ def build_agent():
         return build_graph_agent(
             OpenAI(**kwargs), registry, pipeline, guard,
             model=settings.model, total_timeout=settings.total_timeout,
-            max_steps=settings.max_steps,
+            max_steps=settings.max_steps, max_tokens=settings.max_tokens,
         )
 
     return ReActAgent(OpenAI(**kwargs), registry, model=settings.model,
                       total_timeout=settings.total_timeout,
                       max_steps=settings.max_steps,
-                      fastpath_guard=guard)
+                      fastpath_guard=guard, max_tokens=settings.max_tokens)
 
 
 def get_agent():
