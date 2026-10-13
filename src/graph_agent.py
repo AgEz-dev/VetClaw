@@ -56,7 +56,7 @@ class _Ctx:
     """节点闭包共享上下文（client / registry / guard / 超时与步数上限）。"""
 
     def __init__(self, client, registry, guard, model, max_steps,
-                 system_prompt, clock, total_timeout):
+                 system_prompt, clock, total_timeout, max_tokens=None):
         self.client = client
         self.registry = registry
         self.guard = guard
@@ -65,6 +65,7 @@ class _Ctx:
         self.system_prompt = system_prompt
         self.clock = clock
         self.total_timeout = total_timeout
+        self.max_tokens = max_tokens
 
 
 def _writer():
@@ -121,9 +122,11 @@ def llm_node(state, ctx):
     stream = None
     try:
         # 韧性：与手写引擎共用同一实现（退避重试 + 熔断），保证双引擎零漂移
-        stream = call_llm(
-            ctx.client, model=ctx.model, messages=state["messages"],
-            tools=ctx.registry.schemas(), stream=True)
+        llm_kwargs = dict(model=ctx.model, messages=state["messages"],
+                          tools=ctx.registry.schemas(), stream=True)
+        if ctx.max_tokens is not None:
+            llm_kwargs["max_tokens"] = ctx.max_tokens
+        stream = call_llm(ctx.client, **llm_kwargs)
         for chunk in stream:
             if ctx.clock() - start > ctx.total_timeout:
                 return {"error": timeout_err, "tool_parts": {}, "route": "finalize"}
@@ -244,12 +247,12 @@ def degrade_node(state, ctx):
 # --------------------------------------------------------------------------- graph
 
 def build_graph(client, registry, guard, *, model, max_steps, system_prompt,
-                clock, total_timeout):
+                clock, total_timeout, max_tokens=None):
     """编译状态图。langgraph 符号在本函数体内懒加载（冷启动纪律）。"""
     from langgraph.graph import END, START, StateGraph
 
     ctx = _Ctx(client, registry, guard, model, max_steps, system_prompt,
-               clock, total_timeout)
+               clock, total_timeout, max_tokens)
     graph = StateGraph(AgentState)
     graph.add_node("guard", partial(guard_node, ctx=ctx))
     graph.add_node("llm", partial(llm_node, ctx=ctx))
@@ -307,7 +310,8 @@ class GraphAgent:
 
 def build_graph_agent(client, registry, pipeline, guard, *, model="gpt-4o-mini",
                       total_timeout=30.0, max_steps=5,
-                      system_prompt=DEFAULT_SYSTEM_PROMPT, clock=None):
+                      system_prompt=DEFAULT_SYSTEM_PROMPT, clock=None,
+                      max_tokens=None):
     """装配层入口（`services/agent_service.py` 的 langgraph 分支调用）。
 
     `pipeline` 在此仅作接口占位——Fast-Path 需要的 `RAGPipeline` 已注入 `guard`，
@@ -317,5 +321,6 @@ def build_graph_agent(client, registry, pipeline, guard, *, model="gpt-4o-mini",
 
     graph = build_graph(client, registry, guard, model=model, max_steps=max_steps,
                         system_prompt=system_prompt,
-                        clock=clock or time.monotonic, total_timeout=total_timeout)
+                        clock=clock or time.monotonic, total_timeout=total_timeout,
+                        max_tokens=max_tokens)
     return GraphAgent(graph)

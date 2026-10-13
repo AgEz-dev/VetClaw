@@ -82,7 +82,8 @@ def render_patient_context(patient_context) -> str:
 class ReActAgent:
     def __init__(self, client, registry, model="gpt-4o-mini",
                  max_steps=5, system_prompt=DEFAULT_SYSTEM_PROMPT,
-                 clock=None, total_timeout=30.0, fastpath_guard=None):
+                 clock=None, total_timeout=30.0, fastpath_guard=None,
+                 max_tokens=None):
         self.client = client
         self.registry = registry
         self.model = model
@@ -91,6 +92,8 @@ class ReActAgent:
         self._clock = clock or time.monotonic
         self.total_timeout = total_timeout
         self.guard = fastpath_guard
+        # 输出长度上界（VETCLAW_MAX_TOKENS，默认 800）：防 token 滥用，测试注入 None 表示不传
+        self.max_tokens = max_tokens
 
     def run(self, prompt, history=None, patient_context=None):
         # 消费统一事件流：done 取 answer、error 取 message，与流式行为 100% 一致。
@@ -142,9 +145,11 @@ class ReActAgent:
             stream = None
             try:
                 # 韧性：退避重试 + 熔断（与 graph 引擎共用同一实现，保证零漂移）
-                stream = call_llm(
-                    self.client, model=self.model, messages=messages,
-                    tools=self.registry.schemas(), stream=True)
+                llm_kwargs = dict(model=self.model, messages=messages,
+                                  tools=self.registry.schemas(), stream=True)
+                if self.max_tokens is not None:
+                    llm_kwargs["max_tokens"] = self.max_tokens
+                stream = call_llm(self.client, **llm_kwargs)
                 for chunk in stream:
                     if self._clock() - start > self.total_timeout:
                         yield {"event": "error", "data": {"code": "MODEL_TIMEOUT",

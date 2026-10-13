@@ -3,10 +3,10 @@ import json
 import logging
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from observability import get_request_id, set_request_id
-from schemas.chat import ChatRequest
+from schemas.chat import ChatRequest, RecordDraftRequest
 from services.agent_service import get_agent
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,47 @@ def chat_stream(req: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/record/draft")
+def record_draft(req: RecordDraftRequest):
+    """病历起草（问诊辅助 · 第二批）：**一次请求 = 一份草稿**（非流式 JSON）。
+
+    红线钉死在 ``record_draft`` 模块：输出白名单里**没有 diagnosis**，诊断措辞的
+    文本一律丢弃；主诉/医嘱按数据库列宽截断。解析失败或模型通道不可用 → **503
+    友好错误**（调用方降级，主流程不崩）。
+    """
+    from record_draft import build_draft_messages, disclaimer_for, parse_draft_response
+
+    from services.intake_service import get_llm
+
+    llm = get_llm()
+    if llm is None:
+        return JSONResponse(status_code=503,
+                            content={"code": "DRAFT_UNAVAILABLE",
+                                     "message": "起草暂不可用（模型通道未配置），请稍后重试"})
+
+    dialogue_text = "\n".join(str(d.get("text", "")) for d in req.dialogue
+                              if isinstance(d, dict))
+    pet = req.patient_context.model_dump() if req.patient_context else None
+    try:
+        raw = llm(build_draft_messages(req.summary, req.dialogue, req.archive, pet))
+    except Exception:
+        logger.exception("record draft llm error")
+        return JSONResponse(status_code=503,
+                            content={"code": "DRAFT_UNAVAILABLE",
+                                     "message": "起草暂不可用，请稍后重试"})
+
+    draft = parse_draft_response(raw)
+    draft["disclaimer"] = disclaimer_for(dialogue_text)
+    if not draft["chief_complaint"]:
+        # 模型通道在跑但产出不可解析 —— 按失败处理，绝不给医生一张空草稿
+        return JSONResponse(status_code=503,
+                            content={"code": "DRAFT_UNAVAILABLE",
+                                     "message": "本次起草未成功，请稍后重试"})
+    return {"code": 0, "message": "ok",
+            "data": {"draft": draft,
+                     "meta": {"generated_by": "vetclaw", "trace_id": get_request_id()}}}
 
 
 @router.post("/intake/stream")
