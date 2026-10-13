@@ -5,7 +5,7 @@
     "basis": "《预问诊-问诊项与话术规范-v0.1》：国内《诊断学》病史采集框架 + VIN(WSAVA 2003)《The Vomiting Dog》+ AKC 兽医问诊建议",
     "rules": {
       "max_questions_per_turn": 2,
-      "max_turns": 8,
+      "max_turns": 12,
       "priority_order": [
         "P0",
         "P1",
@@ -136,41 +136,45 @@
       "key": "vaccine",
       "name": "预防接种",
       "priority": "P2",
-      "required": false,
+      "required": true,
       "source": "archive",
       "data_source": "PetVaccination + VaccineCatalog",
       "ask_if_missing": "它最近的疫苗和驱虫是按时间做的吗？",
-      "why": "既往史·预防接种；档案有则不问（少问一半问题的关键）"
+      "why": "既往史·预防接种；影响免疫安排 —— 档案有值不问，缺失必问",
+      "ask": "它最近的疫苗和驱虫是按时间做的吗？"
     },
     {
       "key": "past_disease",
       "name": "既往疾病与手术",
       "priority": "P2",
-      "required": false,
+      "required": true,
       "source": "archive",
       "data_source": "PetMedicalRecord",
       "ask_if_missing": "它以前得过什么病，或者做过手术吗？",
-      "why": "既往史；与现病可能直接相关"
+      "why": "既往史；与现病和处置安排相关 —— 档案有值不问，缺失必问",
+      "ask": "它以前得过什么病，或者做过手术吗？"
     },
     {
       "key": "medications",
       "name": "在用药",
-      "priority": "P2",
-      "required": false,
+      "priority": "P1",
+      "required": true,
       "source": "archive",
       "data_source": "PetPrescription",
       "ask_if_missing": "目前有在吃什么药吗？",
-      "why": "既往史；影响用药安全判断"
+      "why": "既往史·在用药；直接影响开药安全 —— 档案有值不问，缺失必问",
+      "ask": "目前有在吃什么药吗？"
     },
     {
       "key": "allergy",
       "name": "过敏史",
-      "priority": "P2",
-      "required": false,
+      "priority": "P1",
+      "required": true,
       "source": "archive",
       "data_source": "PetInfo.allergies",
       "ask_if_missing": "有没有已知的过敏（药物、食物）？",
-      "why": "既往史·过敏史；用药安全红线"
+      "why": "既往史·过敏史；用药安全红线 —— 档案有值不问，缺失必问",
+      "ask": "有没有已知的过敏（药物、食物）？"
     }
   ],
   "branches": {
