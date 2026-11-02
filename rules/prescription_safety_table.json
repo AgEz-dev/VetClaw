@@ -1,0 +1,79 @@
+{
+  "_notes": {
+    "purpose": "机器可读的处方安全约束表，供 src/prescription_review.py 使用。人读版本见 knowledge/prescription_and_otc_drugs.md（下称「说明书」）与 knowledge/species_drug_safety_matrix.md（下称「矩阵」）。",
+    "grounding": "本表**不改写原文结论，只做结构化镜像**。每条约束都带 chunk_id，用于审核输出溯源。原文未载明的内容一律不写 —— 审核遇到表外药物时输出 WARN（未收录，需人工核定），而不是推测。",
+    "chunk_ids": "所有 chunk_id 均从 data/chroma 的 knowledge 集合实导，非手写。",
+    "dose_note": "剂量区间为说明书/默克手册载明的参考区间（说明书 §红线：实际用药必须由执业兽医根据体重、肝肾功能与病情核定）。本表只用于「超出上限提醒复核」，不用于开具处方。"
+  },
+  "drugs": [
+    {
+      "key": "amoxicillin_clavulanate",
+      "label": "速诺（阿莫西林克拉维酸钾）",
+      "names": ["速诺", "阿莫西林克拉维酸钾", "阿莫西林", "克拉维酸", "synulox", "clavamox", "amoxicillin"],
+      "allergy_groups": ["青霉素", "penicillin", "阿莫西林"],
+      "species_banned": ["兔", "豚鼠", "仓鼠"],
+      "dose_mg_per_kg": {"犬": [12.5, 12.5], "狗": [12.5, 12.5]},
+      "fixed_dose_species": ["猫"],
+      "citations": {
+        "allergy": "knowledge/prescription_and_otc_drugs.md#速诺-阿莫西林克拉维酸钾-2",
+        "species_banned": "knowledge/prescription_and_otc_drugs.md#速诺-阿莫西林克拉维酸钾-2",
+        "dose": "knowledge/prescription_and_otc_drugs.md#速诺-阿莫西林克拉维酸钾-1"
+      },
+      "notes": "猫用固定剂量 62.5 mg/只，非按 kg（说明书剂量表）。"
+    },
+    {
+      "key": "metronidazole",
+      "label": "甲硝唑",
+      "names": ["甲硝唑", "metronidazole"],
+      "allergy_groups": [],
+      "species_banned": [],
+      "dose_mg_per_kg": {"犬": [10, 25], "狗": [10, 25], "猫": [10, 25]},
+      "max_frequency_per_day": {"猫": 1},
+      "citations": {
+        "dose": "knowledge/prescription_and_otc_drugs.md#甲硝唑-4",
+        "frequency": "knowledge/prescription_and_otc_drugs.md#甲硝唑-5"
+      },
+      "notes": "猫需减频次，防神经毒性（说明书「重要警示」）。"
+    },
+    {
+      "key": "doxycycline",
+      "label": "多西环素",
+      "names": ["多西环素", "doxycycline", "强力霉素"],
+      "allergy_groups": ["四环素"],
+      "species_banned": [],
+      "dose_mg_per_kg": {"犬": [5, 10], "狗": [5, 10], "猫": [5, 10]},
+      "citations": {
+        "dose": "knowledge/prescription_and_otc_drugs.md#多西环素-7",
+        "cat_warning": "knowledge/prescription_and_otc_drugs.md#多西环素-8"
+      },
+      "cat_advisory": "猫服后须随餐或喂药后立即给水 3-6 mL，防药片滞留食管致食管狭窄。"
+    },
+    {
+      "key": "drontal",
+      "label": "拜宠清（吡喹酮 + 非班太尔）",
+      "names": ["拜宠清", "吡喹酮", "非班太尔", "drontal", "praziquantel", "febantel"],
+      "allergy_groups": [],
+      "species_banned": [],
+      "citations": {
+        "interaction": "knowledge/prescription_and_otc_drugs.md#拜宠清-吡喹酮-非班太尔-11",
+        "form": "knowledge/prescription_and_otc_drugs.md#拜宠清-吡喹酮-非班太尔-10"
+      },
+      "forbidden_combo_keywords": ["哌嗪", "piperazine"],
+      "cat_requires_specific_form": true,
+      "notes": "与驱蛔药（如哌嗪）不可同时使用；猫必须使用猫专用剂型（说明书剂量表）。"
+    },
+    {
+      "key": "frontline",
+      "label": "福来恩（非泼罗尼）",
+      "names": ["福来恩", "非泼罗尼", "frontline", "fipronil"],
+      "allergy_groups": [],
+      "species_banned": ["兔"],
+      "min_age_weeks": 8,
+      "min_weight_kg": 2.0,
+      "citations": {
+        "usage": "knowledge/prescription_and_otc_drugs.md#福来恩-非泼罗尼-14"
+      },
+      "notes": "8 周龄以下或体重 < 2 kg 禁用；兔等小动物禁用。"
+    }
+  ]
+}

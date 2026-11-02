@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 from api import router  # noqa: E402
+from a2a.routes import router as a2a_router  # noqa: E402
 from core.config import settings  # noqa: E402
 from observability import RequestIdMiddleware, install_logging  # noqa: E402
 
@@ -51,6 +52,8 @@ app.add_middleware(
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(router)
+# A2A 编排层（case 级任务契约）：编排放服务端，调用方只提交结构化数据 + 幂等键
+app.include_router(a2a_router)
 
 
 @app.exception_handler(Exception)

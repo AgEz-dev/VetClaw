@@ -33,3 +33,6 @@ data/*
 !data/.gitkeep
 *.sqlite3
 *.bin
+
+# 反馈评测集：含真实问答文本，本地生成、不入库
+datasets/
