@@ -68,6 +68,23 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "VetClaw Clinical AI Agent",
+        "version": "2.2.0",
+        "description": "专科宠物医院数字化系统 · 临床AI决策与处方安全审查智能体",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "chat_stream": "/chat/stream",
+            "a2a_task_stream": "/a2a/task/stream",
+            "prescription_review": "/prescription/review"
+        }
+    }
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
