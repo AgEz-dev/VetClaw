@@ -48,12 +48,12 @@ def _call_with(client, fn, *args, **kwargs):
 
 # --------------------------------------------------------------------- 注册与治理
 
-def test_seven_tools_registered():
+def test_eight_tools_registered():
     names = {s["function"]["name"] for s in registry.schemas()}
     assert {"search_knowledge_base", "lookup_drug_label", "check_drug_safety",
             "get_pet_profile", "get_vaccination_history", "get_medication_history",
-            "escalate_to_human"} <= names
-    assert len(names) == 7
+            "get_inventory_summary", "escalate_to_human"} <= names
+    assert len(names) == 8
 
 
 def test_escalation_requires_pet_id_and_reason():

@@ -175,5 +175,30 @@ def test_worst_verdict_keeps_block():
     assert worst_verdict(Verdict.PASS, Verdict.NONE) is Verdict.PASS
 
 
+def test_cephalexin_penicillin_cross_allergy_blocked():
+    """真实药房药品：头孢氨苄（β-内酰胺）对青霉素类过敏动物必须阻断。"""
+    out = review_prescription(_payload(
+        [{"drug_name": "头孢氨苄片", "dose_mg_per_kg": 20}],
+        species="猫", allergies="对青霉素类药物过敏"))
+    assert out["verdict"] == "block"
+    assert "ALLERGY_CONTRAINDICATION" in _codes(out)
+
+
+def test_permethrin_dog_spot_on_blocked_in_cat():
+    """真实药房药品：体外驱虫滴剂(犬用/含除虫菊酯)用于猫必须致命级阻断。"""
+    out = review_prescription(_payload(
+        [{"drug_name": "体外驱虫滴剂(犬用)"}], species="猫"))
+    assert out["verdict"] == "block"
+    assert "SPECIES_BANNED" in _codes(out)
+
+
+def test_hospital_pharmacy_normal_saline_passes():
+    """真实药房药品：生理盐水注射液正常开具应 PASS 且不报未收录。"""
+    out = review_prescription(_payload(
+        [{"drug_name": "生理盐水注射液", "dose_mg_per_kg": 30}], species="犬"))
+    assert out["verdict"] == "pass"
+    assert "DRUG_NOT_IN_KNOWLEDGE" not in _codes(out)
+
+
 if __name__ == "__main__":
     raise SystemExit(sys.exit(__import__("pytest").main([__file__, "-q"])))

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import logging
+import pydantic
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -196,3 +197,30 @@ def submit_task_stream(req: A2aTaskRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class A2aFeedbackRequest(pydantic.BaseModel):
+    trace_id: str = ""
+    role: str = "DOCTOR"
+    query: str = ""
+    retrieved_chunk_ids: list[str] = []
+    ai_output: str = ""
+    human_revised_output: str = ""
+    reason: str = ""
+
+
+@router.post("/feedback")
+def submit_feedback(req: A2aFeedbackRequest):
+    """接收人工修正或点踩反馈 (Badcase)，脱敏落盘驱动数据飞轮。"""
+    from feedback_store import record_feedback
+    tid = req.trace_id or get_request_id() or "unknown"
+    record = record_feedback(
+        trace_id=tid,
+        role=req.role,
+        query=req.query,
+        retrieved_chunk_ids=req.retrieved_chunk_ids,
+        ai_output=req.ai_output,
+        human_revised_output=req.human_revised_output,
+        reason=req.reason
+    )
+    return {"code": 0, "message": "feedback recorded", "data": record}

@@ -163,7 +163,7 @@ def test_consult_whitelist_covers_read_tools_and_escalation():
     assert ROLE_TOOLS[ROLE_CONSULT] == {
         "search_knowledge_base", "lookup_drug_label", "check_drug_safety",
         "get_pet_profile", "get_vaccination_history", "get_medication_history",
-        "escalate_to_human",
+        "get_inventory_summary", "escalate_to_human",
     }
 
 

@@ -315,6 +315,13 @@ class RAGPipeline:
         sparse = self._bm25_search(query, top_k)
         return self._rrf_fuse(dense, sparse, top_k=top_k)
 
+    async def async_search(self, query: str, top_k: int = 3) -> list[dict]:
+        """异步非阻塞混合检索：通过 asyncio.to_thread 将 CPU 密集型 BGE Embedding 向量推理
+        与 BM25 分词重排卸载到线程池执行，防止阻塞 FastAPI 主事件循环 (Event Loop)。
+        """
+        import asyncio
+        return await asyncio.to_thread(self.search, query, top_k=top_k)
+
     def count(self) -> int:
         return self.collection.count()
 

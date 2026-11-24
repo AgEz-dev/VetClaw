@@ -114,7 +114,8 @@ class PrescriptionReviewer:
         items = prescription.get("items") or []
 
         species = normalize_species(patient.get("species"))
-        allergies = str(patient.get("allergies") or "")
+        raw_allergies = str(patient.get("allergies") or "").strip()
+        allergies = "" if raw_allergies.lower() in {"无", "无过敏史", "暂无", "否", "none", "n/a", "-", "未见异常", "健康"} else raw_allergies
         weight_kg = patient.get("weight_kg")
         age_weeks = patient.get("age_weeks")
         pregnant = bool(patient.get("pregnant"))

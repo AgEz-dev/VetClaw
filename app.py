@@ -16,6 +16,7 @@ from api import router  # noqa: E402
 from a2a.routes import router as a2a_router  # noqa: E402
 from core.config import settings  # noqa: E402
 from observability import RequestIdMiddleware, install_logging  # noqa: E402
+from mcp_server import mcp_server  # noqa: E402
 
 # 结构化日志 + request_id 注入（维度 6），取代裸 logging.basicConfig
 install_logging()
@@ -80,11 +81,33 @@ def root():
             "docs": "/docs",
             "chat_stream": "/chat/stream",
             "a2a_task_stream": "/a2a/task/stream",
-            "prescription_review": "/prescription/review"
+            "prescription_review": "/prescription/review",
+            "mcp_jsonrpc": "/mcp"
         }
     }
+
+
+@app.post("/mcp")
+async def handle_mcp_jsonrpc(request: Request):
+    """MCP (Model Context Protocol) 开放协议端点 (JSON-RPC 2.0)."""
+    try:
+        body = await request.json()
+        resp = mcp_server.handle_message(body)
+        return JSONResponse(content=resp)
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(e)}}
+        )
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/prescription/review")
+@app.post("/api/prescription/review")
+def direct_prescription_review(req: dict):
+    from prescription_review import review_prescription
+    return review_prescription(req)

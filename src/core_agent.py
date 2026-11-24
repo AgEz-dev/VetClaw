@@ -356,3 +356,69 @@ def _safe_args(raw):
         return json.loads(raw)
     except json.JSONDecodeError:
         return {"_raw": raw}
+
+
+# ----------------------------------------------------------------------
+# 轻量 Critic 自我反思守卫 (Self-Reflection Guard)
+# ----------------------------------------------------------------------
+
+CITED_CHUNK_TAG_REGEX = re.compile(r"(?:【来源[:：]\s*|\[)(knowledge\/[a-zA-Z0-9_\.\-#\u4e00-\u9fa5]+)(?:】|\])")
+USER_OVERSTEP_DIAGNOSIS_REGEX = re.compile(r"(确诊为你得了|确诊为|明确诊断为|可以直接确诊|定性诊断明确)", re.IGNORECASE)
+USER_PRESCRIPTION_DOSE_REGEX = re.compile(r"(?:口服|注射|静滴|服用|给药)?\s*(?:阿莫西林|头孢|恩诺沙星|甲硝唑|布洛芬|对乙酰氨基酚)\s*(?:\d+(?:\.\d+)?\s*(?:mg|ml|片|支|粒))", re.IGNORECASE)
+
+
+def critic_review(
+    draft_or_answer: str,
+    role: str = "USER",
+    retrieved_chunks: list[dict] | None = None
+) -> tuple[bool, str, dict]:
+    """轻量 Critic 自我反思与合规修正守卫。
+
+    检查项：
+    ① 普通宠主 (USER) 回答是否越权出现确诊断言或具体处方用药剂量；若违规，自动剔除断言并附带安全就医警示；
+    ② 执业兽医 (DOCTOR) 补液/休克/纠酸方案是否遗漏静脉补钾上限 (<= 0.5 mEq/kg/h)；若遗漏，自动注入硬红线；
+    ③ 引用角标溯源验证：核对引用的 chunk_id 是否真实存在于本次检索切片中；若为虚构引用，自动剔除幻觉角标。
+
+    返回: (passed: bool, corrected_content: str, details: dict)
+    """
+    if not draft_or_answer:
+        return True, draft_or_answer, {"violations": [], "corrections": []}
+
+    content = draft_or_answer
+    violations = []
+    corrections = []
+
+    # 1. 宠主端越权确诊与开具处方药剂量审查
+    if role == "USER":
+        if USER_OVERSTEP_DIAGNOSIS_REGEX.search(content):
+            violations.append("宠主端越权确诊")
+            content = USER_OVERSTEP_DIAGNOSIS_REGEX.sub("疑似可能存在相关消化道/呼吸道异常表现（非确诊，须执业兽医面诊）", content)
+            corrections.append("去确诊化温和表述修正")
+
+        if USER_PRESCRIPTION_DOSE_REGEX.search(content):
+            violations.append("宠主端开具具体处方药剂量")
+            content = USER_PRESCRIPTION_DOSE_REGEX.sub("相关处方抗生素（须兽医依体重与肝肾指标开具，切忌私自用药）", content)
+            corrections.append("处方药剂量清洗并注入禁忌警示")
+
+    # 2. 医生端纠酸液体疗法补钾速度红线
+    if role == "DOCTOR":
+        if any(k in content for k in ["细小", "休克", "纠酸", "补钾", "液体复苏"]):
+            if "0.5" not in content or ("mEq/kg" not in content and "meq/kg" not in content.lower()):
+                violations.append("医生端液体方案遗漏补钾速度安全上限")
+                content += "\n\n> ⚠️ **【临床用药安全硬红线】**：静脉补钾速度上限严格遵守 $\\le 0.5\\text{ mEq/kg/hour}$，严禁未经稀释静滴过快或静脉推注纯高浓度氯化钾！"
+                corrections.append("自动追加静脉补钾速度上限 (<= 0.5 mEq/kg/h)")
+
+    # 3. 引用溯源真实性验证
+    if retrieved_chunks is not None:
+        valid_chunks = {c.get("chunk_id") for c in retrieved_chunks if c.get("chunk_id")}
+        matches = list(CITED_CHUNK_TAG_REGEX.finditer(content))
+        for m in reversed(matches):
+            cid = m.group(1)
+            if cid not in valid_chunks:
+                violations.append(f"引用幻觉切片: {cid}")
+                start, end = m.span()
+                content = content[:start] + content[end:]
+                corrections.append(f"剔除未召回的虚假引用角标 [{cid}]")
+
+    passed = len(violations) == 0
+    return passed, content, {"violations": violations, "corrections": corrections}

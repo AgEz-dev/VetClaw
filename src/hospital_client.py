@@ -72,6 +72,11 @@ class HospitalClient:
                              timeout=self.read_timeout, retryable=True,
                              params={"limit": int(limit)})
 
+    def get_inventory_summary(self) -> list:
+        """查询医院全院药房与物资当前库存台账。"""
+        return self._request("GET", "/internal/ai/inventory/summary",
+                             timeout=self.read_timeout, retryable=True)
+
     # ------------------------------------------------------------------ 写
 
     def add_memory(self, pet_id: int, fact_type: str, fact_value: str,

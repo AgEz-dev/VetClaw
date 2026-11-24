@@ -138,6 +138,12 @@ def get_medication_history(pet_id: int) -> list:
 
 
 @_tool
+def get_inventory_summary() -> list:
+    """查询医院当前药品与耗材库存台账（包含药品名、规格、在库数量、警戒线与受控属性）。"""
+    return hospital_provider.get().get_inventory_summary()
+
+
+@_tool
 def escalate_to_human(pet_id: int, reason: str) -> dict:
     """转人工：把当前病例交给医院医生跟进（唯一写操作）；reason 必填，写明为什么需要医生介入。"""
     clean_reason = str(reason or "").strip()
@@ -159,7 +165,7 @@ def escalate_to_human(pet_id: int, reason: str) -> dict:
 def register_to(reg):
     for fn in (lookup_drug_label, check_drug_safety,
                get_pet_profile, get_vaccination_history, get_medication_history,
-               escalate_to_human):
+               get_inventory_summary, escalate_to_human):
         reg.register(fn)
 
 

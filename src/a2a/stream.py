@@ -63,6 +63,11 @@ def token_frame(text: str) -> dict:
 def done_frame(result: TaskResult) -> dict:
     """终态帧。字段是旧 `done` 事件的**超集**：旧字段（answer/citations）原样保留，
     因此医院侧现有中继无需改动即可消费。"""
+    try:
+        from telemetry import get_telemetry_snapshot
+        telem = result.payload.get("telemetry") or get_telemetry_snapshot()
+    except Exception:
+        telem = {}
     return frame(EVENT_DONE, {
         "answer": result.payload.get("answer", ""),
         "citations": result.citations,
@@ -75,6 +80,7 @@ def done_frame(result: TaskResult) -> dict:
         "confidence": result.confidence,
         "trace_id": result.trace_id,
         "deduped": result.deduped,
+        "telemetry": telem,
     })
 
 
