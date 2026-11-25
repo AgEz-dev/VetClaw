@@ -31,5 +31,12 @@ class Settings:
         )
         self.cors_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
+        # 医院业务系统的内部接口（M2M，共享密钥，不走 JWT）。
+        # 密钥为空 = 远端工具一律返回 HOSPITAL_NOT_CONFIGURED，绝不裸奔访问。
+        self.hospital_base_url = os.getenv(
+            "VETCLAW_HOSPITAL_BASE_URL", "http://127.0.0.1:8080"
+        ).rstrip("/")
+        self.hospital_secret = os.getenv("VETCLAW_HOSPITAL_SECRET", "")
+
 
 settings = Settings()

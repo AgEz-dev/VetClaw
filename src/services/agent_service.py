@@ -1,6 +1,8 @@
 """Agent 装配与单例管理：生产环境懒加载，测试可注入替身。"""
+from a2a.roles import ROLE_CONSULT, RoleScopedRegistry
 from tools import registry
 import knowledge_tool  # noqa: F401  导入即注册 search_knowledge_base
+import hospital_tools  # noqa: F401  导入即注册药品规则 + 医院远端工具
 from core_agent import ReActAgent
 
 _agent = None
@@ -14,6 +16,8 @@ def build_agent():
     from fastpath import FastPathGuard
     from rag_pipeline import RAGPipeline, BGEEmbeddingFunction
     from knowledge_tool import rag_provider
+    # 会话位工具白名单：模型只看到这一份工具集（执行层仍会再拒绝一次）
+    consult_registry = RoleScopedRegistry(registry, ROLE_CONSULT)
     kwargs = {"timeout": settings.timeout}
     if settings.base_url:
         kwargs["base_url"] = settings.base_url
@@ -35,12 +39,12 @@ def build_agent():
                 "请确认已安装可选依赖：pip install -e '.[graph]'"
             ) from exc
         return build_graph_agent(
-            OpenAI(**kwargs), registry, pipeline, guard,
+            OpenAI(**kwargs), consult_registry, pipeline, guard,
             model=settings.model, total_timeout=settings.total_timeout,
             max_steps=settings.max_steps, max_tokens=settings.max_tokens,
         )
 
-    return ReActAgent(OpenAI(**kwargs), registry, model=settings.model,
+    return ReActAgent(OpenAI(**kwargs), consult_registry, model=settings.model,
                       total_timeout=settings.total_timeout,
                       max_steps=settings.max_steps,
                       fastpath_guard=guard, max_tokens=settings.max_tokens)

@@ -13,8 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 from api import router  # noqa: E402
+from a2a.routes import router as a2a_router  # noqa: E402
 from core.config import settings  # noqa: E402
 from observability import RequestIdMiddleware, install_logging  # noqa: E402
+from mcp_server import mcp_server  # noqa: E402
 
 # 结构化日志 + request_id 注入（维度 6），取代裸 logging.basicConfig
 install_logging()
@@ -51,6 +53,8 @@ app.add_middleware(
 app.add_middleware(RequestIdMiddleware)
 
 app.include_router(router)
+# A2A 编排层（case 级任务契约）：编排放服务端，调用方只提交结构化数据 + 幂等键
+app.include_router(a2a_router)
 
 
 @app.exception_handler(Exception)
@@ -65,6 +69,45 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "VetClaw Clinical AI Agent",
+        "version": "2.2.0",
+        "description": "专科宠物医院数字化系统 · 临床AI决策与处方安全审查智能体",
+        "endpoints": {
+            "health": "/health",
+            "docs": "/docs",
+            "chat_stream": "/chat/stream",
+            "a2a_task_stream": "/a2a/task/stream",
+            "prescription_review": "/prescription/review",
+            "mcp_jsonrpc": "/mcp"
+        }
+    }
+
+
+@app.post("/mcp")
+async def handle_mcp_jsonrpc(request: Request):
+    """MCP (Model Context Protocol) 开放协议端点 (JSON-RPC 2.0)."""
+    try:
+        body = await request.json()
+        resp = mcp_server.handle_message(body)
+        return JSONResponse(content=resp)
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(e)}}
+        )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/prescription/review")
+@app.post("/api/prescription/review")
+def direct_prescription_review(req: dict):
+    from prescription_review import review_prescription
+    return review_prescription(req)

@@ -86,15 +86,68 @@ def build_summary_fallback(state: dict, template: dict, conversation_text: str =
     }
 
 
+def detect_memory_conflict(current_text_or_slots: dict | str, l3_profile: dict | None) -> list[dict]:
+    """检测当前预问诊输入与历史 L3 长期档案的高危冲突 (过敏史、慢性器官衰竭、禁药)。"""
+    if not l3_profile:
+        return []
+
+    text = ""
+    if isinstance(current_text_or_slots, str):
+        text = current_text_or_slots
+    elif isinstance(current_text_or_slots, dict):
+        text = " ".join(str(v) for v in current_text_or_slots.values() if v)
+
+    conflicts = []
+    allergies = str(l3_profile.get("allergies") or "")
+    chronic = str(l3_profile.get("chronic_diseases") or l3_profile.get("chronic") or "")
+
+    # 1. 过敏史冲突 (青霉素/阿莫西林/头孢)
+    if any(k in allergies for k in ["青霉素", "阿莫西林", "头孢", "磺胺"]):
+        if any(tr in text for tr in ["感染", "发炎", "脓", "消炎药", "抗生素", "打针", "青霉素", "阿莫西林", "头孢", "细菌"]):
+            conflicts.append({
+                "type": "ALLERGY_CONFLICT",
+                "risk_title": "[历史档案风险提示 · 药物过敏红线]",
+                "history_fact": f"既往过敏史: {allergies}",
+                "high_priority_question": f"【历史档案风险提示】档案记录患宠既往存在「{allergies}」高危过敏史。请问此前过敏曾出现哪些具体反应（如面部水肿/皮疹/休克）？当前是否已私自喂食过消炎药？",
+                "doctor_alert": f"⚠️ 【历史档案过敏警示】患宠记录有「{allergies}」过敏史，处方抗感染严禁开具相关致敏药物！"
+            })
+
+    # 2. 慢性肾病冲突 (呕吐脱水极易加剧肾衰)
+    if any(k in chronic for k in ["肾病", "肾衰", "肾功能不全", "CKD"]):
+        if any(tr in text for tr in ["吐", "呕吐", "不吃", "脱水", "少尿", "无尿"]):
+            conflicts.append({
+                "type": "CHRONIC_RENAL_CONFLICT",
+                "risk_title": "[历史档案风险提示 · 慢性肾病急性恶化防线]",
+                "history_fact": f"既往慢性病: {chronic}",
+                "high_priority_question": "【历史档案风险提示】档案记录患宠患有慢性肾功能不全，频繁呕吐脱水极易诱发急性肾前性肾衰竭。请问最近是否出现完全不喝水或尿量显著减少？",
+                "doctor_alert": "⚠️ 【历史档案重症警示】基础病慢性肾衰合并急性呕吐脱水，到院需优先建立静脉通道并加急化验肾功生化！"
+            })
+
+    # 3. 基础心脏病冲突 (咳嗽气喘输液红线)
+    if any(k in chronic for k in ["心脏", "心肌病", "心衰", "HCM"]):
+        if any(tr in text for tr in ["咳", "喘", "呼吸急促", "张嘴呼吸", "发喘"]):
+            conflicts.append({
+                "type": "HEART_FAILURE_CONFLICT",
+                "risk_title": "[历史档案风险提示 · 心源性呼吸窘迫防线]",
+                "history_fact": f"既往慢性病: {chronic}",
+                "high_priority_question": "【历史档案风险提示】档案记录患宠有基础心脏病史，当前咳嗽气喘需高度警惕心源性肺水肿。请问爱宠在安静睡觉时的呼吸次数（静息呼吸率）每分钟是否超过 30 次？",
+                "doctor_alert": "⚠️ 【历史档案急症警示】基础心脏病史合并呼吸困难，切忌过量/快速补液，到院严防心源性肺水肿并发症！"
+            })
+
+    return conflicts
+
+
 class IntakeSession:
     """一次预问诊会话（内存态；同一用户 + 同一预约对应一个实例）。"""
 
     def __init__(self, template: dict | None = None, llm=None, archive: dict | None = None,
-                 guard=None, patient_context: dict | None = None, max_turns: int | None = None):
+                 guard=None, patient_context: dict | None = None, max_turns: int | None = None,
+                 l3_profile: dict | None = None):
         self.template = template or load_template()
         self.llm = llm                      # callable(messages) -> str；None = 纯规则模式
         self.guard = guard                  # FastPathGuard；None = 不做急症中断
         self.patient_context = patient_context or {}
+        self.l3_profile = l3_profile or (self.patient_context.get("l3_profile") if isinstance(self.patient_context, dict) else {}) or {}
         self.max_turns = max_turns or self.template["meta"]["rules"]["max_turns"]
         self.scope = slots_without_options(self.template)
 
@@ -105,15 +158,13 @@ class IntakeSession:
         self.emergency = None
         self.summary: dict | None = None
         self._asked: list[str] = []
+        self.detected_conflicts: list[dict] = []
+        self._memory_conflict_asked: bool = False
 
     # ------------------------------------------------------------------ 状态续传
 
     def to_state(self) -> dict:
-        """导出**可续传的不透明状态**，由调用方（Java）保存并在下次请求原样带回。
-
-        VetClaw 保持**无状态**：不押会话、不需要 session id / TTL、不强依赖内存缓存。
-        代价是状态要往返一次 —— 对本项目完全可接受（对话本来就要落库给医生看原文）。
-        """
+        """导出**可续传的不透明状态**，由调用方（Java）保存并在下次请求原样带回。"""
         return {
             "slots": self.state,
             "conversation": self.conversation,
@@ -121,6 +172,8 @@ class IntakeSession:
             "asked": list(self._asked),
             "interrupted": self.interrupted,
             "emergency": self.emergency,
+            "detected_conflicts": list(self.detected_conflicts),
+            "memory_conflict_asked": self._memory_conflict_asked,
         }
 
     @classmethod
@@ -136,6 +189,8 @@ class IntakeSession:
         session._asked = list(state.get("asked") or [])
         session.interrupted = bool(state.get("interrupted"))
         session.emergency = state.get("emergency")
+        session.detected_conflicts = list(state.get("detected_conflicts") or [])
+        session._memory_conflict_asked = bool(state.get("memory_conflict_asked"))
         return session
 
     # ------------------------------------------------------------------ 对外接口
@@ -168,7 +223,33 @@ class IntakeSession:
             self.emergency = hit
             return self._finish()
 
-        # ② 规则通道（选项型）→ ③ LLM 通道（自由文本，仅补缺）
+        # ② 历史 L3 长期记忆冲突主动召回与高优打断
+        conflicts = detect_memory_conflict(reply, self.l3_profile)
+        if conflicts and not self._memory_conflict_asked:
+            self._memory_conflict_asked = True
+            self.detected_conflicts.extend(conflicts)
+            c = conflicts[0]
+            preempt_picks = [{
+                "key": "memory_conflict_preemption",
+                "name": "高危档案冲突追问",
+                "ask": c["high_priority_question"],
+                "options": [
+                    "未私自喂药，此前仅轻度皮疹/胃肠不适",
+                    "曾出现呼吸急促/过敏性休克高危",
+                    "已私自喂食药物（请在下方说明药名与剂量）"
+                ]
+            }]
+            self._asked = [q["key"] for q in preempt_picks]
+            self.turns += 1
+            return {
+                "mode": "intake",
+                "done": False,
+                "questions": _as_items(preempt_picks),
+                "slots": render_status(self.state, self.template, self.conversation),
+                "state": self.to_state(),
+            }
+
+        # ③ 规则通道（选项型）→ ④ LLM 通道（自由文本，仅补缺）
         apply_reply(self.state, reply, self.template, self.conversation,
                     archive=None, asked_keys=self._asked)
         if self.llm is not None:
@@ -195,14 +276,14 @@ class IntakeSession:
 
     def snapshot(self) -> dict:
         """契约 §3.4 的 ``done.intake`` 载荷。"""
+        current_sum = self.summary or self._build_summary()
         return {
             "slots": {row["key"]: {"state": row["state"], "value": row["value"],
                                    "source": row["source"]}
                       for row in render_status(self.state, self.template, self.conversation)},
-            "summary": self.summary or build_summary_fallback(
-                self.state, self.template, self.conversation),
-            "ai_hints": (self.summary or {}).get("ai_hints", []),
-            "suggested_questions": (self.summary or {}).get("suggested_questions", []),
+            "summary": current_sum,
+            "ai_hints": (current_sum or {}).get("ai_hints", []),
+            "suggested_questions": (current_sum or {}).get("suggested_questions", []),
             "free_text": self.state.get("free_note", {}).get("value", ""),
             "incomplete": incomplete_keys(self.state, self.template, self.conversation),
             "interrupted": self.interrupted,
@@ -235,15 +316,32 @@ class IntakeSession:
         if self.interrupted and self.emergency:
             fallback = build_summary_fallback(self.state, self.template, self.conversation)
             fallback["ai_hints"] = [{"text": _EMERGENCY_SUMMARY, "citations": []}]
+            self._inject_conflict_hints(fallback)
             return fallback
         if self.llm is None:
-            return build_summary_fallback(self.state, self.template, self.conversation)
+            fallback = build_summary_fallback(self.state, self.template, self.conversation)
+            self._inject_conflict_hints(fallback)
+            return fallback
         try:
             raw = self.llm(build_summary_messages(
                 self.conversation, render_status(self.state, self.template, self.conversation)))
             summary = parse_summary_response(raw)
         except Exception:
-            return build_summary_fallback(self.state, self.template, self.conversation)
+            fallback = build_summary_fallback(self.state, self.template, self.conversation)
+            self._inject_conflict_hints(fallback)
+            return fallback
         if not summary.get("chief_complaint") and not any(summary.get("present_illness", {}).values()):
-            return build_summary_fallback(self.state, self.template, self.conversation)
+            fallback = build_summary_fallback(self.state, self.template, self.conversation)
+            self._inject_conflict_hints(fallback)
+            return fallback
+        self._inject_conflict_hints(summary)
         return summary
+
+    def _inject_conflict_hints(self, summary_dict: dict) -> None:
+        if not self.detected_conflicts:
+            return
+        hints = summary_dict.setdefault("ai_hints", [])
+        for c in self.detected_conflicts:
+            doctor_alert = c.get("doctor_alert")
+            if doctor_alert and not any(h.get("text") == doctor_alert for h in hints):
+                hints.insert(0, {"text": doctor_alert, "citations": []})

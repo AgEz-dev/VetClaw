@@ -15,7 +15,9 @@ from __future__ import annotations
 import json
 import re
 
+from a2a.roles import ROLE_DRAFT, role_prompt
 from intake_llm import _DIAGNOSIS_PATTERNS, _strip_code_fence
+from memory_l3 import render_memory_block
 
 # 数据库列宽（pet_medical_record）：超长会直接让落库报错，必须在这里截断
 _CHIEF_MAX = 255          # chief_complaint varchar(255)
@@ -33,13 +35,15 @@ _DISCLAIMER_URGENT = _DISCLAIMER + "宠主描述疑似涉及误食/中毒等急�
 # --------------------------------------------------------------------- 提示词构造
 
 def build_draft_messages(summary: dict, dialogue: list[dict],
-                         archive: dict | None, pet: dict | None) -> list[dict]:
+                         archive: dict | None, pet: dict | None,
+                         memories: list | None = None) -> list[dict]:
     """构造「从预问诊成果起草病历草稿」的提示词。
 
     :param summary: 预问诊结构化摘要（契约 v1.2 §3.4 的 ``intake``）
     :param dialogue: 对话原文（``[{"role", "text"}]``）
     :param archive: 档案槽位（``vaccine`` / ``past_disease`` / ``medications`` / ``allergy``）
     :param pet: 宠物信号（物种 / 品种 / 年龄 / 体重 / 过敏），只有已知的才传
+    :param memories: L3 长期记忆（已由医院侧按安全事实优先截断），可空
     """
     def _fmt_summary() -> str:
         lines = []
@@ -66,29 +70,19 @@ def build_draft_messages(summary: dict, dialogue: list[dict],
     archive_text = "；".join("%s=%s" % (k, v) for k, v in (archive or {}).items()) or "（无）"
     pet_text = "；".join("%s=%s" % (k, v) for k, v in (pet or {}).items() if v) or "（无）"
 
-    system = (
-        "你在为宠物医生起草电子病历的**叙述性内容**（SOAP 中的 S 与 P 的草稿部分）。\n"
-        "输出 JSON，字段固定为：\n"
-        "{\n"
-        '  "chief_complaint": "主诉：主要症状 + 持续时间，医学叙述，一句话",\n'
-        '  "exam_checklist": ["建议到院核查的查体项目", "..."],\n'
-        '  "doctor_advice": "医嘱草稿：家庭护理与复诊建议",\n'
-        '  "disclaimer": "固定免责声明，原样照抄即可"\n'
-        "}\n"
-        "红线（务必遵守）：\n"
-        "1. **不得给诊断、确诊、鉴别结论** —— 确诊是兽医的执业行为，AI 永远不做；\n"
-        "   `exam_checklist` 只写「建议核查的查体项目」（如「评估脱水程度」），不是查体结果。\n"
-        "2. **不得给处方、药品剂量** —— 用药由医生决定，草稿里不出现任何具体药物剂量。\n"
-        "3. **不得编造**：对话与摘要里没有的信息一律留空，不要推测体重、体温等数值。\n"
-        "4. 主诉以宠主描述为事实基础，做医学化的语言整理，不添油加醋。\n"
-        "5. 只输出 JSON，不要解释文字。"
-    )
+    system = role_prompt(ROLE_DRAFT)
+    if not system:
+        # prompt 缺失属于部署错误：宁可起草失败，也不要用一个没有红线的提示词
+        raise RuntimeError("角色提示词缺失: prompts/roles/draft.md")
     user = (
         "宠物：\n" + pet_text +
         "\n\n档案：\n" + archive_text +
         "\n\n预问诊摘要：\n" + _fmt_summary() +
         "\n\n对话原文：\n" + dialogue_text
     )
+    memory_text = render_memory_block(memories)
+    if memory_text:
+        user += "\n\n长期记忆：\n" + memory_text
     return [{"role": "system", "content": system},
             {"role": "user", "content": user}]
 

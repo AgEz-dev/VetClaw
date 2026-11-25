@@ -14,6 +14,8 @@ services:
       - VETCLAW_TOTAL_TIMEOUT=${VETCLAW_TOTAL_TIMEOUT:-30}
       - VETCLAW_MAX_STEPS=${VETCLAW_MAX_STEPS:-5}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      - VETCLAW_HOSPITAL_BASE_URL=${VETCLAW_HOSPITAL_BASE_URL:-http://127.0.0.1:8080}
+      - VETCLAW_HOSPITAL_SECRET=${VETCLAW_HOSPITAL_SECRET:-}
     env_file:
       - .env
     restart: unless-stopped

@@ -5,6 +5,9 @@ import re
 import time
 from types import SimpleNamespace
 
+from case_context import reset_context, set_context
+from memory import estimate_tokens, message_tokens
+from memory_l3 import render_memory_block
 from resilience import call_llm
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,14 @@ DEFAULT_SYSTEM_PROMPT = """你是 VetClaw，一个宠物健康分诊助手。你
    明确告知该成分不在已收录文档中、不推测剂量，然后引导用户自查牙龈颜色/呼吸频率、
    核对药盒是否含对乙酰氨基酚/木糖醇等已知剧毒成分，并建议带原药盒就医。
 5. 安全声明：每次回答末尾必须提醒"以上建议仅供参考，不能替代执业兽医诊断，紧急情况请立即就医"。
+6. 档案上下文里给出「档案ID」且问题涉及该宠物的疫苗、既往用药或完整档案时，可调用
+   get_pet_profile / get_vaccination_history / get_medication_history（pet_id 填该档案ID）。
+   这些工具返回 JSON，先看 ok：ok=false 时如实说明查不到，不得编造档案内容。
+7. 需要医院医生跟进的复杂或高风险情况，可调用 escalate_to_human（reason 必填，写明原因）。
+   涉及具体药品说明书或单药安全核对时，可用 lookup_drug_label / check_drug_safety；
+   工具结论只作参考，最终以执业兽医判断为准。
+8. 档案上下文里的「长期记忆」必须带来源引用（医院档案 / 宠主确认 / AI 推断（待确认））；
+   标注 AI 推断的只能作为待确认线索，绝不能当作过敏史、用药禁忌或剂量依据。
 
 示例：
 问：狗狗能吃巧克力吗？
@@ -75,8 +86,50 @@ def render_patient_context(patient_context) -> str:
         parts.append(f"最近一次诊断: {_get('latest_diagnosis')}")
     if _get("vaccine_alert_count") is not None:
         parts.append(f"疫苗逾期/将到期提醒数: {_get('vaccine_alert_count')}")
+    # 档案 ID 只在已有其它字段时追加：仅一个 ID 不构成有效背景，
+    # 但它是医院数据工具（get_* / escalate_to_human）的入参来源。
+    if parts and _get("pet_id") is not None:
+        parts.append(f"档案ID: {_get('pet_id')}")
+
+    memory_text = render_memory_block(_get("ai_memories"))
+    if memory_text:
+        if parts:
+            return (f"{PATIENT_CONTEXT_HEADER}\n- " + "；".join(parts)
+                    + "\n" + memory_text)
+        return memory_text
 
     return f"{PATIENT_CONTEXT_HEADER}\n- " + "；".join(parts) if parts else ""
+
+
+def merge_usage(usage, *, messages, text_parts, tool_parts, chunk_usage=None):
+    """把一轮 LLM 调用的用量并入累计 dict（双引擎共用，保证口径一致）。
+
+    真实 usage 优先；流式接口未返回 usage 时按 ``memory.estimate_tokens`` 估算，
+    并置 ``estimated=True`` —— 轨迹里必须能区分真实与估算，避免把估算值当账单。
+    """
+    prompt_tokens = int(getattr(chunk_usage, "prompt_tokens", 0) or 0) if chunk_usage else 0
+    completion_tokens = int(getattr(chunk_usage, "completion_tokens", 0) or 0) if chunk_usage else 0
+    if prompt_tokens or completion_tokens:
+        usage["input_tokens"] = usage.get("input_tokens", 0) + prompt_tokens
+        usage["output_tokens"] = usage.get("output_tokens", 0) + completion_tokens
+        return
+    usage["estimated"] = True
+    usage["input_tokens"] = usage.get("input_tokens", 0) + sum(
+        message_tokens(m) for m in messages)
+    output_tokens = estimate_tokens("".join(text_parts)) if text_parts else 0
+    for slot in (tool_parts or {}).values():
+        output_tokens += estimate_tokens(slot.get("name", ""))
+        output_tokens += estimate_tokens(slot.get("arguments", ""))
+    usage["output_tokens"] = usage.get("output_tokens", 0) + output_tokens
+
+
+def count_tool_calls(usage, count):
+    usage["tool_count"] = usage.get("tool_count", 0) + int(count or 0)
+
+
+def chunk_usage_of(chunk):
+    """取流式 chunk 的 usage（部分兼容端点会在末尾发一个 choices 为空的用量帧）。"""
+    return getattr(chunk, "usage", None)
 
 
 class ReActAgent:
@@ -95,19 +148,31 @@ class ReActAgent:
         # 输出长度上界（VETCLAW_MAX_TOKENS，默认 800）：防 token 滥用，测试注入 None 表示不传
         self.max_tokens = max_tokens
 
-    def run(self, prompt, history=None, patient_context=None):
+    def run(self, prompt, history=None, patient_context=None, case_id="",
+            role="consult"):
         # 消费统一事件流：done 取 answer、error 取 message，与流式行为 100% 一致。
-        for ev in self._run_events(prompt, history, patient_context):
+        for ev in self._run_events(prompt, history, patient_context, case_id, role):
             if ev["event"] == "done":
                 return ev["data"]["answer"]
             if ev["event"] == "error":
                 return ev["data"]["message"]
         return ""
 
-    def run_stream(self, prompt, history=None, patient_context=None):
-        yield from self._run_events(prompt, history, patient_context)
+    def run_stream(self, prompt, history=None, patient_context=None, case_id="",
+                   role="consult", on_usage=None):
+        usage = {}
+        yield from self._run_events(prompt, history, patient_context, case_id, role,
+                                    usage=usage)
+        # 用量通过回调交给编排层写轨迹，**不新增事件**——6 种 SSE 事件契约保持原样。
+        usage.setdefault("tool_count", 0)
+        if on_usage is not None:
+            try:
+                on_usage(usage)
+            except Exception:
+                logger.exception("usage callback error")
 
-    def _run_events(self, prompt, history=None, patient_context=None):
+    def _run_events(self, prompt, history=None, patient_context=None, case_id="",
+                    role="consult", usage=None):
         cite_state = None
         start = self._clock()
 
@@ -142,6 +207,7 @@ class ReActAgent:
                        "message": "模型响应超时，请稍后重试"}}
                 return
             tool_parts, text_parts = {}, []
+            turn_usage = None
             stream = None
             try:
                 # 韧性：退避重试 + 熔断（与 graph 引擎共用同一实现，保证零漂移）
@@ -155,7 +221,13 @@ class ReActAgent:
                         yield {"event": "error", "data": {"code": "MODEL_TIMEOUT",
                                "message": "模型响应超时，请稍后重试"}}
                         return
-                    delta = chunk.choices[0].delta
+                    chunk_usage = chunk_usage_of(chunk)
+                    if chunk_usage is not None:
+                        turn_usage = chunk_usage
+                    choices = getattr(chunk, "choices", None) or []
+                    if not choices:
+                        continue      # 仅含 usage 的末尾帧
+                    delta = choices[0].delta
                     for p in (getattr(delta, "tool_calls", None) or []):
                         idx = getattr(p, "index", 0) or 0
                         slot = tool_parts.setdefault(idx, {"id": "", "name": "", "arguments": ""})
@@ -185,6 +257,12 @@ class ReActAgent:
                     except Exception:
                         pass
 
+            if usage is not None:
+                merge_usage(usage, messages=messages, text_parts=text_parts,
+                            tool_parts=tool_parts, chunk_usage=turn_usage)
+                if tool_parts:
+                    count_tool_calls(usage, len(tool_parts))
+
             if tool_parts:
                 calls = [{"id": v["id"], "type": "function",
                           "function": {"name": v["name"], "arguments": v["arguments"]}}
@@ -197,7 +275,7 @@ class ReActAgent:
                     yield {"event": "thought", "data": {"stage": "executing_tool"}}
                     tc = SimpleNamespace(id=c["id"], function=SimpleNamespace(
                         name=c["function"]["name"], arguments=c["function"]["arguments"]))
-                    content = self._run_tool(tc)
+                    content = self._run_tool(tc, case_id, role)
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
                     yield {"event": "tool_result", "data": {"id": c["id"], "content": content}}
                     if content.startswith(HIT_MARK):
@@ -228,8 +306,8 @@ class ReActAgent:
         # 保证两引擎行为零漂移（阶段四「事件序列 diff 为空」的前提）。
         return compliance_fix(cite_state, final)
 
-    def _run_tool(self, tc):
-        return execute_tool(self.registry, tc)
+    def _run_tool(self, tc, case_id="", role="consult"):
+        return execute_tool(self.registry, tc, case_id, role)
 
 
 def compliance_fix(cite_state, final):
@@ -243,8 +321,15 @@ def compliance_fix(cite_state, final):
     return None
 
 
-def execute_tool(registry, tc):
-    """执行一次工具调用并返回字符串结果。纯函数，双引擎共用。"""
+def execute_tool(registry, tc, case_id="", role="consult"):
+    """执行一次工具调用并返回字符串结果。纯函数，双引擎共用。
+
+    工具白名单由 ``RoleScopedRegistry`` 在注册表边界拒绝（模型看不到越权工具，
+    真调用也会抛 ``PermissionError``）；这里只负责把异常转成模型可读的失败文本。
+    ``case_id`` / ``role`` 在**本次调用的同步栈内**写入上下文，供转人工等写工具
+    把工单关联回病例；不能用模块级全局，两个流并发时会串号。
+    """
+    name = tc.function.name
     raw = tc.function.arguments
     args = {} if not raw else None
     if args is None:
@@ -252,12 +337,16 @@ def execute_tool(registry, tc):
             args = json.loads(raw)
         except json.JSONDecodeError as e:
             return f"参数解析失败: {e}"
-    if tc.function.name.startswith("danger_"):
+    if name.startswith("danger_"):
         return "工具执行失败: PermissionDenied: 该工具为高危操作，已触发安全拦截"
+    role = getattr(registry, "role", role) or role
+    token = set_context(case_id, role)
     try:
-        return str(registry.call(tc.function.name, args))
+        return str(registry.call(name, args))
     except Exception as e:
         return f"工具执行失败: {type(e).__name__}: {e}"
+    finally:
+        reset_context(token)
 
 
 def _safe_args(raw):
@@ -267,3 +356,69 @@ def _safe_args(raw):
         return json.loads(raw)
     except json.JSONDecodeError:
         return {"_raw": raw}
+
+
+# ----------------------------------------------------------------------
+# 轻量 Critic 自我反思守卫 (Self-Reflection Guard)
+# ----------------------------------------------------------------------
+
+CITED_CHUNK_TAG_REGEX = re.compile(r"(?:【来源[:：]\s*|\[)(knowledge\/[a-zA-Z0-9_\.\-#\u4e00-\u9fa5]+)(?:】|\])")
+USER_OVERSTEP_DIAGNOSIS_REGEX = re.compile(r"(确诊为你得了|确诊为|明确诊断为|可以直接确诊|定性诊断明确)", re.IGNORECASE)
+USER_PRESCRIPTION_DOSE_REGEX = re.compile(r"(?:口服|注射|静滴|服用|给药)?\s*(?:阿莫西林|头孢|恩诺沙星|甲硝唑|布洛芬|对乙酰氨基酚)\s*(?:\d+(?:\.\d+)?\s*(?:mg|ml|片|支|粒))", re.IGNORECASE)
+
+
+def critic_review(
+    draft_or_answer: str,
+    role: str = "USER",
+    retrieved_chunks: list[dict] | None = None
+) -> tuple[bool, str, dict]:
+    """轻量 Critic 自我反思与合规修正守卫。
+
+    检查项：
+    ① 普通宠主 (USER) 回答是否越权出现确诊断言或具体处方用药剂量；若违规，自动剔除断言并附带安全就医警示；
+    ② 执业兽医 (DOCTOR) 补液/休克/纠酸方案是否遗漏静脉补钾上限 (<= 0.5 mEq/kg/h)；若遗漏，自动注入硬红线；
+    ③ 引用角标溯源验证：核对引用的 chunk_id 是否真实存在于本次检索切片中；若为虚构引用，自动剔除幻觉角标。
+
+    返回: (passed: bool, corrected_content: str, details: dict)
+    """
+    if not draft_or_answer:
+        return True, draft_or_answer, {"violations": [], "corrections": []}
+
+    content = draft_or_answer
+    violations = []
+    corrections = []
+
+    # 1. 宠主端越权确诊与开具处方药剂量审查
+    if role == "USER":
+        if USER_OVERSTEP_DIAGNOSIS_REGEX.search(content):
+            violations.append("宠主端越权确诊")
+            content = USER_OVERSTEP_DIAGNOSIS_REGEX.sub("疑似可能存在相关消化道/呼吸道异常表现（非确诊，须执业兽医面诊）", content)
+            corrections.append("去确诊化温和表述修正")
+
+        if USER_PRESCRIPTION_DOSE_REGEX.search(content):
+            violations.append("宠主端开具具体处方药剂量")
+            content = USER_PRESCRIPTION_DOSE_REGEX.sub("相关处方抗生素（须兽医依体重与肝肾指标开具，切忌私自用药）", content)
+            corrections.append("处方药剂量清洗并注入禁忌警示")
+
+    # 2. 医生端纠酸液体疗法补钾速度红线
+    if role == "DOCTOR":
+        if any(k in content for k in ["细小", "休克", "纠酸", "补钾", "液体复苏"]):
+            if "0.5" not in content or ("mEq/kg" not in content and "meq/kg" not in content.lower()):
+                violations.append("医生端液体方案遗漏补钾速度安全上限")
+                content += "\n\n> ⚠️ **【临床用药安全硬红线】**：静脉补钾速度上限严格遵守 $\\le 0.5\\text{ mEq/kg/hour}$，严禁未经稀释静滴过快或静脉推注纯高浓度氯化钾！"
+                corrections.append("自动追加静脉补钾速度上限 (<= 0.5 mEq/kg/h)")
+
+    # 3. 引用溯源真实性验证
+    if retrieved_chunks is not None:
+        valid_chunks = {c.get("chunk_id") for c in retrieved_chunks if c.get("chunk_id")}
+        matches = list(CITED_CHUNK_TAG_REGEX.finditer(content))
+        for m in reversed(matches):
+            cid = m.group(1)
+            if cid not in valid_chunks:
+                violations.append(f"引用幻觉切片: {cid}")
+                start, end = m.span()
+                content = content[:start] + content[end:]
+                corrections.append(f"剔除未召回的虚假引用角标 [{cid}]")
+
+    passed = len(violations) == 0
+    return passed, content, {"violations": violations, "corrections": corrections}

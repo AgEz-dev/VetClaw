@@ -16,6 +16,7 @@ COPY pyproject.toml ./
 # 再拷源码（setuptools 需要包源码才能 install）
 COPY src/ ./src/
 COPY schemas/ ./schemas/
+COPY prompts/ ./prompts/
 COPY app.py ./
 
 # 非 root 用户，UID 固定 1000，与 compose 的 user: "1000:1000" 对齐

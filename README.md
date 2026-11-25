@@ -13,6 +13,16 @@
 - **引擎可切换**：默认 `react`；设 `VETCLAW_ENGINE=langgraph` 可切到另一个可选引擎，两者在同一输入下事件序列一致（`tests/test_graph_agent.py` 断言）
 - **防幻觉三层防护**：Prompt 契约 → `cite_state` 局部状态机（hit 不可被 miss 覆盖）→ 补正反馈；回答强制标注【来源：chunk_id】
 - **滑动窗口记忆**：按「assistant + tool_calls 原子块」裁剪，system prompt 预算保护
+- **A2A 编排层（v2.1）**：`case` 级任务契约把各能力位串成一次就诊 —— 预问诊 → 分诊 →
+  病历起草 → **处方安全审核**。编排权在服务端，调用方只提交结构化数据 + 幂等键；
+  同一 case 的上下文自动继承（起草不必重传预问诊摘要，预问诊状态不必每轮往返）
+- **A2A 流式契约（v2.2）**：`POST /a2a/task/stream` 提供与既有 SSE **同构**的事件帧
+  （`start`/`thought`/`tool_call`/`tool_result`/`token`/`done`/`error`），
+  一次请求**有且只有一个终态**；`done` 是旧 `done` 的超集，故下游中继无需改写。
+  问答位（`consult`）已具备流式能力并有测试，**医院侧尚未切换**（见 §9.5）
+- **处方安全审核（AI-4）**：发药前的**确定性**闸门 —— 过敏禁忌 / 物种禁用 / 剧毒物 /
+  不可同服 / 剂量越界 / 年龄体重下限，逐条带 `chunk_id` 溯源；表外药物一律 WARN 交人工，
+  **规则层命中的 block 不可被任何模型结论降级**
 
 ## 技术栈
 
@@ -47,13 +57,22 @@ VetClaw/
 │   ├── fastpath.py           # Fast-Path 规则守卫
 │   ├── triage.py             # 分诊槽位抽取 + 毒物剂量分级（纯函数）
 │   ├── knowledge_tool.py     # RAG 工具适配层（依赖注入）
+│   ├── prescription_review.py # 处方安全审核（AI-4，确定性闸门）
+│   ├── a2a/                  # A2A 编排层（v2.1）
+│   │   ├── contract.py       # case / task / 幂等键 / Verdict 契约（零依赖）
+│   │   ├── store.py          # case 状态 + 幂等回放表（SQLite）
+│   │   ├── agents.py         # 四个能力位适配器（包既有模块，不改语义）
+│   │   ├── supervisor.py     # 编排器（幂等 → 派发 → 落库）
+│   │   └── routes.py         # /a2a/case、/a2a/task、/a2a/case/{id}
 │   ├── api.py                # POST /api/chat/stream SSE 路由
 │   ├── core/config.py        # Settings + .env 加载
 │   └── services/agent_service.py  # Agent 单例装配
 ├── rules/fastpath_rules.json # P0 毒物库 + 药品白名单 + watchlist
 ├── rules/toxin_dose_table.json # 毒物剂量分级表（巧克力可可碱 mg/kg 阈值，机器可读镜像）
+├── rules/prescription_safety_table.json # 处方安全约束镜像（每条带 chunk_id 引用）
 ├── knowledge/                # 权威医疗文档（70 chunks）
 ├── tests/                    # 单元测试 + eval_dataset.json
+├── docs/a2a-contract.md      # A2A 任务契约（调用方对接依据）
 ├── scripts/
 │   ├── ingest_docs.py        # 入库脚本（默认 upsert，--rebuild 重建）
 │   └── evaluate_rag.py       # 评测脚本（Recall@3 / MRR / 拒答率）
@@ -61,11 +80,11 @@ VetClaw/
 └── data/chroma/              # ChromaDB 持久化（.gitignore 忽略）
 ```
 
-## 当前成绩单（V2.0）
+## 当前成绩单（V2.1）
 
 | 指标 | 数值 |
 |---|---|
-| 单元测试 | **186 全绿** |
+| 单元测试 | **350 全绿**（258 既有 + 92 新增 A2A/记忆/反馈/用量） |
 | 引擎一致性（react / langgraph） | **15/15** |
 | 评测集 | **92 组**（检索 40 + 急症 27+2 已知 + 拒答 23） |
 | Pure RAG Recall@3 | **95.00%** (38/40) |
@@ -73,6 +92,7 @@ VetClaw/
 | 急症拦截 | **27/27** |
 | 处方药拒答率 | **100%** (23/23) |
 | System Pass Rate | **88/90 (97.8%)** |
+| 处方审核规则覆盖 | **9 类闸门**（过敏/剧毒/物种/同服/剂量/频次/年龄/体重/剂型） |
 | Fast-Path 拦截 TTFB | **3.2ms**（热请求） |
 | BM25 冷启动重建 | 26ms（70 chunks） |
 

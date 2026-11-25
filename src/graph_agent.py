@@ -26,8 +26,11 @@ from core_agent import (
     HIT_MARK,
     MISS_MARK,
     _safe_args,
+    chunk_usage_of,
     compliance_fix,
+    count_tool_calls,
     execute_tool,
+    merge_usage,
     render_patient_context,
 )
 from resilience import call_llm
@@ -40,6 +43,8 @@ class AgentState(TypedDict, total=False):
     prompt: str
     history: list
     patient_context: dict | None   # 档案上下文（仅追加到 system 提示，不参与判定）
+    case_id: str              # A2A case（工具写操作关联用；不参与判定）
+    role: str                 # 当前角色（工具白名单由执行层强制）
     messages: list            # 累积对话消息
     cite_state: str | None    # None | "hit" | "miss"
     step: int                 # 已执行的 llm 轮数
@@ -50,6 +55,10 @@ class AgentState(TypedDict, total=False):
     citations: list
     error: dict | None
     route: str                # 条件边路由键（节点显式声明）
+    input_tokens: int         # 累计估算/真实输入 token（写入 agent_trace）
+    output_tokens: int
+    tool_count: int
+    usage_estimated: bool     # 是否含估算值（没有拿到上游 usage 时）
 
 
 class _Ctx:
@@ -119,6 +128,7 @@ def llm_node(state, ctx):
         return {"error": timeout_err, "tool_parts": {}, "route": "finalize"}
 
     tool_parts, text_parts = {}, []
+    turn_usage = None
     stream = None
     try:
         # 韧性：与手写引擎共用同一实现（退避重试 + 熔断），保证双引擎零漂移
@@ -130,7 +140,13 @@ def llm_node(state, ctx):
         for chunk in stream:
             if ctx.clock() - start > ctx.total_timeout:
                 return {"error": timeout_err, "tool_parts": {}, "route": "finalize"}
-            delta = chunk.choices[0].delta
+            chunk_usage = chunk_usage_of(chunk)
+            if chunk_usage is not None:
+                turn_usage = chunk_usage
+            choices = getattr(chunk, "choices", None) or []
+            if not choices:
+                continue      # 仅含 usage 的末尾帧
+            delta = choices[0].delta
             for p in (getattr(delta, "tool_calls", None) or []):
                 idx = getattr(p, "index", 0) or 0
                 slot = tool_parts.setdefault(idx, {"id": "", "name": "", "arguments": ""})
@@ -160,8 +176,17 @@ def llm_node(state, ctx):
                 pass
 
     route = "tools" if tool_parts else "compliance"
+    turn = {}
+    merge_usage(turn, messages=state["messages"], text_parts=text_parts,
+                tool_parts=tool_parts, chunk_usage=turn_usage)
+    if tool_parts:
+        count_tool_calls(turn, len(tool_parts))
     return {"tool_parts": tool_parts, "text_parts": text_parts,
-            "step": state.get("step", 0) + 1, "route": route}
+            "step": state.get("step", 0) + 1, "route": route,
+            "input_tokens": state.get("input_tokens", 0) + turn.get("input_tokens", 0),
+            "output_tokens": state.get("output_tokens", 0) + turn.get("output_tokens", 0),
+            "tool_count": state.get("tool_count", 0) + turn.get("tool_count", 0),
+            "usage_estimated": bool(state.get("usage_estimated") or turn.get("estimated"))}
 
 
 def tools_node(state, ctx):
@@ -182,7 +207,8 @@ def tools_node(state, ctx):
         writer({"event": "thought", "data": {"stage": "executing_tool"}})
         tc = SimpleNamespace(id=c["id"], function=SimpleNamespace(
             name=c["function"]["name"], arguments=c["function"]["arguments"]))
-        content = execute_tool(ctx.registry, tc)
+        content = execute_tool(ctx.registry, tc, state.get("case_id", ""),
+                               state.get("role", "consult"))
         messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
         writer({"event": "tool_result", "data": {"id": c["id"], "content": content}})
         if content.startswith(HIT_MARK):
@@ -287,25 +313,52 @@ class GraphAgent:
     def __init__(self, graph):
         self._graph = graph
 
-    def run(self, prompt, history=None, patient_context=None):
+    def run(self, prompt, history=None, patient_context=None, case_id="",
+            role="consult"):
         # 与 ReActAgent.run 语义一致：done 取 answer、error 取 message。
-        for ev in self.run_stream(prompt, history, patient_context):
+        for ev in self.run_stream(prompt, history, patient_context, case_id, role):
             if ev["event"] == "done":
                 return ev["data"]["answer"]
             if ev["event"] == "error":
                 return ev["data"]["message"]
         return ""
 
-    def run_stream(self, prompt, history=None, patient_context=None):
+    def run_stream(self, prompt, history=None, patient_context=None, case_id="",
+                   role="consult", on_usage=None):
         init = {"prompt": prompt, "history": list(history) if history else [],
-                "patient_context": patient_context}
+                "patient_context": patient_context, "case_id": case_id,
+                "role": role}
+        usage = {}
         try:
-            yield from self._graph.stream(init, stream_mode="custom")
+            # 同时消费 values 流只为拿最终用量；对外的 custom 事件序列一字不改。
+            for item in self._graph.stream(init, stream_mode=["custom", "values"]):
+                if (isinstance(item, tuple) and len(item) == 2
+                        and item[0] in ("custom", "values")):
+                    mode, chunk = item
+                else:
+                    # 兼容只实现 custom 的测试桩：裸事件即 custom
+                    mode, chunk = "custom", item
+                if mode == "custom":
+                    yield chunk
+                elif isinstance(chunk, dict):
+                    usage = {
+                        "input_tokens": int(chunk.get("input_tokens", 0) or 0),
+                        "output_tokens": int(chunk.get("output_tokens", 0) or 0),
+                        "tool_count": int(chunk.get("tool_count", 0) or 0),
+                    }
+                    if chunk.get("usage_estimated"):
+                        usage["estimated"] = True
         except Exception:
             # 阶段四实测坑 C：节点内异常会冒到调用方 → 适配器兜底转 error 事件
             logger.exception("graph stream error")
             yield {"event": "error", "data": {"code": "INTERNAL_ERROR",
                                               "message": "服务内部错误，请稍后重试"}}
+        finally:
+            if on_usage is not None:
+                try:
+                    on_usage(usage)
+                except Exception:
+                    logger.exception("usage callback error")
 
 
 def build_graph_agent(client, registry, pipeline, guard, *, model="gpt-4o-mini",

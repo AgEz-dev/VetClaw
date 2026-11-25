@@ -27,12 +27,21 @@ def function_to_schema(func: Callable) -> dict:
 class Tool:
     def __init__(self, func: Callable, schema: dict):
         self.func, self.schema = func, schema
+        # 参数白名单：模型只能传 schema 里声明过的参数。
+        # 多余字段直接拒绝而不是塞给函数体——静默丢弃会让模型误以为参数生效了。
+        self.allowed_params = frozenset(
+            p.name for p in inspect.signature(func).parameters.values()
+            if p.kind not in (inspect.Parameter.VAR_POSITIONAL,
+                              inspect.Parameter.VAR_KEYWORD))
 
     @property
     def name(self) -> str:
         return self.schema["function"]["name"]
 
     def __call__(self, **kwargs) -> Any:
+        extra = set(kwargs) - self.allowed_params
+        if extra:
+            raise ValueError(f"参数不在白名单: {sorted(extra)}")
         return self.func(**kwargs)
 
 
@@ -54,7 +63,7 @@ class ToolRegistry:
         return self._tools[name]
 
     def call(self, name: str, arguments: dict) -> Any:
-        return self.get(name).func(**arguments)
+        return self.get(name)(**arguments)
 
     def schemas(self) -> List[dict]:
         return [t.schema for t in self._tools.values()]
