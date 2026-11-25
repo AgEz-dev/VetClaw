@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import threading
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -9,7 +10,8 @@ sys.path.insert(0, str(ROOT / "src"))
 import pytest
 from fastapi.testclient import TestClient
 from app import app
-from rag_pipeline import RAGPipeline, BGEEmbeddingFunction
+from rag_pipeline import RAGPipeline
+from tests.test_rag_pipeline import FakeEmbedding
 from feedback_store import (
     record_feedback,
     load_badcases,
@@ -18,9 +20,24 @@ from feedback_store import (
 )
 
 
-def test_async_search_non_blocking():
-    """测试 async_search 使用 asyncio.to_thread 进行异步线程隔离。"""
-    pipe = RAGPipeline("data/chroma", "knowledge", embedding_function=BGEEmbeddingFunction())
+def test_async_search_non_blocking(tmp_path):
+    """测试 async_search 使用 asyncio.to_thread 进行异步线程隔离（自包含临时索引，不依赖本地 data/chroma）。"""
+    db_dir = tmp_path / "chroma"
+    doc_file = tmp_path / "lily_toxin.md"
+    doc_file.write_text("# 百合属中毒\n\n猫咪误食百合花会导致急性肾衰竭，必须立即催吐送医。\n", encoding="utf-8")
+
+    pipe = RAGPipeline(str(db_dir), "test_async_col", embedding_function=FakeEmbedding())
+    assert pipe.ingest(str(doc_file)) >= 1
+
+    main_tid = threading.get_ident()
+    worker_tids = []
+    orig_search = pipe.search
+
+    def _wrapped_search(*args, **kwargs):
+        worker_tids.append(threading.get_ident())
+        return orig_search(*args, **kwargs)
+
+    pipe.search = _wrapped_search
 
     async def _search():
         res = await pipe.async_search("猫咪百合花中毒", top_k=2)
@@ -30,6 +47,7 @@ def test_async_search_non_blocking():
 
     results = asyncio.run(_search())
     assert len(results) > 0
+    assert worker_tids and worker_tids[0] != main_tid
 
 
 def test_anonymize_text_privacy():
